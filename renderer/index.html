@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<title>X32 Fernsteuerung</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">X32 <b>Fernsteuerung</b></span>
+    </div>
+    <div class="conn-row">
+      <input id="ip-input" type="text" placeholder="192.168.0.64" />
+      <button id="connect-btn" class="btn small">Verbinden</button>
+      <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div>
+    </div>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <script src="app.js"></script>
+</body>
+</html>
