@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("x32API", {
+  scan: () => ipcRenderer.invoke("x32-scan"),
   connect: (ip) => ipcRenderer.invoke("x32-connect", ip),
   disconnect: () => ipcRenderer.invoke("x32-disconnect"),
   setFader: (ch, value) => ipcRenderer.invoke("x32-set-fader", ch, value),

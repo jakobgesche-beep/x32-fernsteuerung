@@ -33,6 +33,14 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
   Attack, Hold, Release, Knee, Mix)
 - Änderungen, die direkt am Pult gemacht werden (Fader, Mute), erscheinen
   automatisch auch in der App (`/xremote`-Abo)
+- Grafische EQ-Kurve pro Kanal (wie an einem Allen&Heath Avantis o.ä.):
+  zeigt die kombinierte Filterkurve aller 4 Bänder live an; Punkte direkt
+  auf der Kurve ziehen ändert Frequenz &amp; Gain, Mausrad über einem Punkt
+  ändert die Bandbreite (Q)
+- "Pult suchen": durchsucht automatisch das aktuelle WLAN/Netzwerk nach
+  X32/M32-Konsolen (OSC `/xinfo`-Anfrage an alle Adressen im Subnetz) und
+  zeigt sie zur Auswahl an — keine IP-Adresse mehr nötig, sofern der Mac
+  im selben Netzwerk wie das Pult ist
 - Auto-Update wie bei der DMX-App: prüft beim Start auf GitHub nach neuen
   Releases, lädt sie im Hintergrund, Balken zum Neustart & Installieren
 

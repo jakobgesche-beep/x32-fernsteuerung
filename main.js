@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+const os = require("os");
 const dgram = require("dgram");
 const { autoUpdater } = require("electron-updater");
 const proto = require("./x32-protocol");
@@ -138,6 +139,45 @@ function stopKeepAlive() {
   clearInterval(xremoteTimer); clearInterval(metersTimer);
   xremoteTimer = null; metersTimer = null;
 }
+
+// ---------- Netzwerk-Suche (aktuelles WLAN durchsuchen statt IP eintippen) ----------
+function localSubnetCandidates() {
+  const ifaces = os.networkInterfaces();
+  for (const name in ifaces) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        const base = iface.address.split(".").slice(0, 3).join(".");
+        const candidates = [];
+        for (let h = 1; h <= 254; h++) candidates.push(base + "." + h);
+        return { localIp: iface.address, candidates };
+      }
+    }
+  }
+  return null;
+}
+
+ipcMain.handle("x32-scan", async () => {
+  return new Promise((resolve) => {
+    const info = localSubnetCandidates();
+    if (!info) { resolve([]); return; }
+    const found = new Map();
+    const scanSocket = dgram.createSocket("udp4");
+    scanSocket.on("message", (msg, rinfo) => {
+      try {
+        const { address, args } = proto.decodeMessage(msg);
+        if (address === "/xinfo" && args.length >= 3) {
+          found.set(rinfo.address, { ip: rinfo.address, name: args[1].value, model: args[2].value, version: args[3] ? args[3].value : "" });
+        }
+      } catch (e) {}
+    });
+    scanSocket.on("error", () => {});
+    scanSocket.bind(() => {
+      const buf = proto.encodeMessage("/xinfo", []);
+      info.candidates.forEach((ip) => { try { scanSocket.send(buf, 0, buf.length, X32_PORT, ip); } catch (e) {} });
+      setTimeout(() => { scanSocket.close(); resolve(Array.from(found.values())); }, 1800);
+    });
+  });
+});
 
 ipcMain.handle("x32-connect", async (event, ip) => {
   return new Promise((resolve) => {

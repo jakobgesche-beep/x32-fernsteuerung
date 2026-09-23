@@ -96,6 +96,13 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .detail-title{font-family:var(--font-head);font-size:16px;}
 .close-btn{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;}
 .section-title{font-size:12.5px;font-weight:600;margin:16px 0 10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.05em;}
+.eq-graph{width:100%;height:170px;display:block;border:1px solid var(--line);border-radius:10px;cursor:crosshair;margin-bottom:14px;}
+.eq-graph-hint{margin-top:-8px;}
+.scan-row{display:flex;align-items:center;justify-content:space-between;padding:10px 4px;border-bottom:1px solid var(--line-soft);cursor:pointer;}
+.scan-row:last-child{border-bottom:none;}
+.scan-row:hover{background:rgba(255,255,255,0.03);}
+.scan-name{font-weight:600;font-size:13.5px;}
+.scan-sub{color:var(--muted);font-size:11px;font-family:var(--font-mono);}
 .eq-band{display:grid;grid-template-columns:70px 1fr 1fr 1fr;gap:8px;align-items:center;margin-bottom:8px;font-size:11.5px;}
 .eq-band select{background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px;font-size:11px;}
 .field-inline{display:flex;flex-direction:column;gap:3px;}
