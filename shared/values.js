@@ -65,6 +65,41 @@
     return s.kind === "linf" ? V.linfToActual(wire, s.min, s.max) : V.logfToActual(wire, s.min, s.max);
   };
 
+  // Datentyp, in dem der Parameter zum Pult geschickt wird ("f", "i" oder "s")
+  V.wireType = function (path) {
+    const s = V.specOf(path);
+    if (!s) return null;
+    return s.kind === "string" ? "s" : s.kind === "enum" || s.kind === "int" ? "i" : "f";
+  };
+
+  // Startwerte für den Offline-Modus (Rohwerte, wie sie das Pult liefern würde): Fader auf 0 dB, alles eingeschaltet,
+  // EQ glatt, Kompressor/Gate ausgeschaltet mit üblichen Einstellungen. undefined = kein Startwert bekannt.
+  const EQ4_F = [100, 400, 2000, 8000], EQ6_F = [60, 160, 400, 1000, 3000, 8000];
+  const DEFAULTS = {
+    "mix/fader": 0.75, "fader": 0.75, "mix/on": 1, "on": 1, "mix/pan": 0.5,
+    "config/name": "", "config/icon": 1, "config/color": 0,
+    "eq/on": 1,
+    "dyn/on": 0, "dyn/mode": 0, "dyn/det": 0, "dyn/env": 0, "dyn/auto": 0, "dyn/keysrc": 0, "dyn/ratio": 3,
+    "dyn/thr": V.actualToLinf(-20, -60, 0), "dyn/mgain": 0, "dyn/attack": V.actualToLinf(10, 0, 120),
+    "dyn/hold": V.actualToLogf(10, 0.02, 2000), "dyn/release": V.actualToLogf(100, 5, 4000), "dyn/knee": 0.2, "dyn/mix": 1,
+    "dyn/filter/on": 0, "dyn/filter/type": 0, "dyn/filter/f": 0.5,
+    "gate/on": 0, "gate/mode": 0, "gate/keysrc": 0, "gate/thr": V.actualToLinf(-60, -80, 0), "gate/range": 1,
+    "gate/attack": 0, "gate/hold": V.actualToLogf(50, 0.02, 2000), "gate/release": V.actualToLogf(200, 5, 4000),
+    "gate/filter/on": 0, "gate/filter/type": 0, "gate/filter/f": 0.5,
+    "preamp/hpon": 0, "preamp/hpslope": 0, "preamp/hpf": 0,
+  };
+  V.defaultWire = function (path) {
+    const leaf = leafOf(path);
+    if (Object.prototype.hasOwnProperty.call(DEFAULTS, leaf)) return DEFAULTS[leaf];
+    const m = /\/eq\/(\d)\/(type|f|g|q)$/.exec(path);
+    if (!m) return undefined;
+    const band = +m[1], six = /^\/(?:bus|mtx|main)\//.test(path), last = six ? 6 : 4;
+    if (m[2] === "g") return 0.5;
+    if (m[2] === "q") return V.actualToLogf(2, 10, 0.3);
+    if (m[2] === "f") return V.actualToLogf((six ? EQ6_F : EQ4_F)[band - 1], 20, 20000);
+    return six ? (band === 1 ? 1 : band === last ? 4 : 2) : 2;      // type: Low-Shelf / PEQ / High-Shelf bzw. nur PEQ
+  };
+
   // ---------- Aufzählungen ----------
   V.EQ_TYPES_BASIC = ["LCut", "LShv", "PEQ", "VEQ", "HShv", "HCut"];
   V.EQ_TYPES_EXT = V.EQ_TYPES_BASIC.concat(["BU6", "BU12", "BS12", "LR12", "BU18", "BU24", "BS24", "LR24"]);

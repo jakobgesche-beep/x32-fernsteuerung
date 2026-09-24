@@ -5,6 +5,7 @@ const ipInput = document.getElementById('ip-input');
 const connectBtn = document.getElementById('connect-btn');
 const scanBtn = document.getElementById('scan-btn');
 const layerTabs = document.getElementById('layer-tabs');
+const offlineBtn = document.getElementById('offline-btn');
 
 function el(html){ const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -38,13 +39,14 @@ let lastState = 'idle';
 
 function updateStatus(s){
   const st = s.state;
-  statusBadge.classList.remove('live', 'warn', 'bad', 'ping-good', 'ping-mid', 'ping-bad');
+  statusBadge.classList.remove('live', 'warn', 'bad', 'ping-good', 'ping-mid', 'ping-bad', 'offline-mode');
   const consoleEl = document.getElementById('console');
   consoleEl.classList.toggle('offline', st === 'idle');
   consoleEl.classList.toggle('reconnecting', st === 'lost' || st === 'connecting');
   let text = 'nicht verbunden';
   if(st === 'connecting'){ text = 'Verbinde…'; statusBadge.classList.add('warn'); }
   else if(st === 'lost'){ text = 'Verbindung verloren – suche…'; statusBadge.classList.add('bad'); }
+  else if(st === 'offline'){ text = 'Offline-Modus'; statusBadge.classList.add('offline-mode'); }
   else if(st === 'online'){
     statusBadge.classList.add('live');
     if(s.progress < 1 && s.open > 40) text = 'Synchronisiere ' + Math.round(s.progress * 100) + ' %';
@@ -52,7 +54,12 @@ function updateStatus(s){
     if(s.rtt != null) statusBadge.classList.add(s.rtt < 15 && !(s.loss >= 5) ? 'ping-good' : s.rtt < 40 && !(s.loss >= 10) ? 'ping-mid' : 'ping-bad');
   }
   statusText.textContent = text;
-  connectBtn.textContent = st === 'idle' ? 'Verbinden' : 'Trennen';
+  connectBtn.textContent = st === 'idle' || st === 'offline' ? 'Verbinden' : 'Trennen';
+  offlineBtn.textContent = st === 'offline' ? 'Offline beenden' : 'Offline-Modus';
+  offlineBtn.disabled = st !== 'idle' && st !== 'offline';
+  offlineBtn.title = offlineBtn.disabled ? 'Erst vom Pult trennen' : 'Ohne Pult arbeiten: alle Regler lassen sich ausprobieren und vorbereiten';
+  if(typeof Offline !== 'undefined') Offline.update(s);
+  if(st === 'idle' || st === 'offline') resetMeterDisplays();      // keine alten Pegel stehen lassen
   if(st === 'online' && !wantedOnce){ wantedOnce = true; wantAll(); }
   if(st === 'lost' && lastState !== 'lost') toast('Verbindung zum Pult verloren – die App versucht es automatisch weiter.', true);
   lastState = st;
@@ -142,7 +149,28 @@ function layerStrips(id){ return STRIPS.filter((s) => s.layer === id && !DOCK_ID
 const dockStrips = STRIPS.filter((s) => DOCK_IDS.includes(s.id));
 function layerPaths(id){ return layerStrips(id).flatMap((s) => X32V.basicPaths(s)); }
 
+// Offline-Modus: ohne Pult arbeiten (Startwerte, Änderungen bleiben in der App, später aufs Pult übertragbar)
+async function enterOffline(){
+  const st = X.status().state;
+  if(st === 'offline') return;
+  if(st !== 'idle') await window.x32API.disconnect();
+  Object.keys(METER_STATE).forEach((k) => delete METER_STATE[k]);
+  CLIPPED.clear(); clipChanged();
+  X.enterOffline();
+  wantedOnce = false;
+  X.want(STRIPS.flatMap((s) => X32V.basicPaths(s)));      // alle Kanalzüge, damit auch Szenen alles erfassen
+  setLayer(currentLayer);
+}
+function leaveOffline(){
+  if(!X.isOffline()) return;
+  X.leaveOffline();
+  setLayer(currentLayer);
+}
+offlineBtn.addEventListener('click', () => (X.isOffline() ? leaveOffline() : enterOffline()));
+document.getElementById('hint-offline-btn').addEventListener('click', enterOffline);
+
 async function connectTo(ip){
+  if(X.isOffline()) leaveOffline();
   ipInput.value = ip;
   try { localStorage.setItem('x32-ip', ip); } catch(e){}
   wantedOnce = false;
@@ -151,7 +179,7 @@ async function connectTo(ip){
 }
 
 connectBtn.addEventListener('click', async () => {
-  if(X.status().state !== 'idle'){
+  if(X.status().state !== 'idle' && X.status().state !== 'offline'){
     await window.x32API.disconnect();
     updateStatus({ state: 'idle', progress: 1 });
     return;
@@ -332,7 +360,7 @@ function setLayer(id){
   });
   app.innerHTML = '';
   app.appendChild(row);
-  if(X.status().state === 'online') X.want(layerPaths(id).concat(dockStrips.flatMap((s) => X32V.basicPaths(s))));
+  if(X.isLive()) X.want(layerPaths(id).concat(dockStrips.flatMap((s) => X32V.basicPaths(s))));
   X.setSubs(X32V.subscriptionSpecs(id));
   updateHot();
 }
@@ -376,6 +404,13 @@ const CLIP_LEVEL = 0.98;      // ca. -0,2 dBFS
 // Zustand je Kanalzug (auch für nicht sichtbare Ebenen): letzte Werte, gehaltene Spitze; Übersteuerung bleibt gemerkt
 const METER_STATE = {};
 const CLIPPED = new Set();
+function resetMeterDisplays(){
+  Object.keys(METER_STATE).forEach((k) => delete METER_STATE[k]);
+  Object.values(stripUI).concat(Object.values(dockUI)).forEach((ui) => {
+    ui.fills.forEach((f) => { f.style.height = '100%'; });
+    ui.peakEls.forEach((p) => { p.style.opacity = '0'; });
+  });
+}
 function clipChanged(){
   Object.values(stripUI).concat(Object.values(dockUI)).forEach((ui) => { if(ui.clipEl) ui.clipEl.classList.toggle('on', CLIPPED.has(ui.strip.id)); });
   if(typeof Overview !== 'undefined') Overview.refresh();

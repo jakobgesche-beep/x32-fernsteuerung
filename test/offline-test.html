@@ -1,0 +1,66 @@
+<!DOCTYPE html><html><body><pre id="out"></pre>
+<script>try { localStorage.clear(); } catch (e) {}</script>
+<script src="../shared/values.js"></script>
+<script>
+// Offline-Modus: Startwerte für alle Parameter und die Umschaltung im Wertespeicher (store.js).
+window.__sent = [];
+window.x32API = { onBatch() {}, onStatus() {}, onMeter() {}, set: (p, t, v) => window.__sent.push([p, t, v]), want() {}, refresh() {}, setMeters() {}, setSubs() {}, setHot() {}, snapshot: async () => [] };
+</script>
+<script src="../renderer/store.js"></script>
+<script>
+const out = []; let fails = 0;
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FAIL  ') + name + (detail !== undefined ? '  ' + detail : '')); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const V = X32V, STRIPS = V.buildStrips();
+
+(async () => {
+  // ---- Startwerte ----
+  const paths = STRIPS.flatMap((s) => V.basicPaths(s).concat(V.detailPaths(s)));
+  const missing = paths.filter((p) => V.defaultWire(p) === undefined);
+  check('Startwerte gibt es für alle ' + paths.length + ' Parameter (Kanalzüge, EQ, Kompressor, Gate, Low Cut)', missing.length === 0, missing.slice(0, 4).join(', '));
+  const badType = paths.filter((p) => { const d = V.defaultWire(p), t = V.wireType(p); return !(t === 's' ? typeof d === 'string' : t === 'i' ? Number.isInteger(d) : (typeof d === 'number' && d >= 0 && d <= 1)); });
+  check('Startwerte haben den passenden Typ (Text, ganze Zahl, Fließkomma 0..1)', badType.length === 0, badType.slice(0, 4).join(', '));
+  check('Fader 0 dB, Mute aus, Pan Mitte, DCA-Fader 0 dB', V.defaultWire('/ch/01/mix/fader') === 0.75 && V.defaultWire('/ch/01/mix/on') === 1 && V.defaultWire('/ch/01/mix/pan') === 0.5 && V.defaultWire('/dca/3/fader') === 0.75 && V.defaultWire('/dca/3/on') === 1);
+  check('4-Band-EQ (Kanal): Bänder 100 / 400 / 2000 / 8000 Hz, glatt (0 dB), Q = 2, alle glockenförmig', [100, 400, 2000, 8000].every((f, i) => near(V.fromWire('/ch/01/eq/' + (i + 1) + '/f', V.defaultWire('/ch/01/eq/' + (i + 1) + '/f')), f, 0.01)) && near(V.fromWire('/ch/01/eq/2/g', V.defaultWire('/ch/01/eq/2/g')), 0, 1e-9) && near(V.fromWire('/ch/01/eq/2/q', V.defaultWire('/ch/01/eq/2/q')), 2, 1e-6) && [1, 2, 3, 4].every((b) => V.defaultWire('/ch/01/eq/' + b + '/type') === 2));
+  check('6-Band-EQ (Bus): Band 1 Low-Shelf, Band 6 High-Shelf, Band 6 bei 8 kHz', V.defaultWire('/bus/03/eq/1/type') === 1 && V.defaultWire('/bus/03/eq/6/type') === 4 && V.defaultWire('/bus/03/eq/3/type') === 2 && near(V.fromWire('/bus/03/eq/6/f', V.defaultWire('/bus/03/eq/6/f')), 8000, 0.01));
+  check('Kompressor: aus, Schwelle -20 dB, Ratio 3 (2,0:1 = Index 3), Attack 10 ms, Release 100 ms', V.defaultWire('/ch/01/dyn/on') === 0 && near(V.fromWire('/ch/01/dyn/thr', V.defaultWire('/ch/01/dyn/thr')), -20, 1e-9) && V.defaultWire('/ch/01/dyn/ratio') === 3 && near(V.fromWire('/ch/01/dyn/attack', V.defaultWire('/ch/01/dyn/attack')), 10, 1e-9) && near(V.fromWire('/ch/01/dyn/release', V.defaultWire('/ch/01/dyn/release')), 100, 1e-6));
+  check('Name leer, Farbe aus, Icon "None"', V.defaultWire('/ch/05/config/name') === '' && V.defaultWire('/ch/05/config/color') === 0 && V.defaultWire('/ch/05/config/icon') === 1);
+  check('Unbekannter Pfad: kein Startwert (statt Fehler)', V.defaultWire('/foo/bar') === undefined && V.wireType('/foo/bar') === null);
+
+  // ---- Wertespeicher: online schickt, offline merkt ----
+  X.setWire('/ch/01/mix/fader', 'f', 0.6);
+  check('Online: Änderung geht zum Pult', __sent.length === 1 && __sent[0][0] === '/ch/01/mix/fader' && X.offlineChanges() === 0);
+  X.enterOffline();
+  check('Offline-Modus: Status "offline", Werte leer, "isLive" wahr', X.status().state === 'offline' && X.isOffline() && X.isLive() && X.get('/ch/01/mix/fader') === undefined);
+  X.want(['/ch/01/mix/fader', '/ch/01/mix/on', '/ch/01/eq/1/f', '/ch/01/config/name']);
+  check('want() füllt Startwerte', X.get('/ch/01/mix/fader') === 0.75 && X.get('/ch/01/mix/on') === 1 && X.get('/ch/01/config/name') === '' && near(X.actual('/ch/01/eq/1/f'), 100, 0.01));
+  let notified = 0; const un = X.subscribe('/ch/01/', () => notified++);
+  __sent.length = 0;
+  X.setWire('/ch/01/mix/fader', 'f', 0.4);
+  X.set('/ch/01/eq/2/g', 6);
+  X.setWire('/ch/01/config/name', 's', 'Kick');
+  check('Offline: Änderungen gehen NICHT zum Pult, werden aber gemerkt und gemeldet', __sent.length === 0 && X.offlineChanges() === 3 && notified === 3 && X.get('/ch/01/mix/fader') === 0.4, 'gesendet ' + __sent.length + ', gemerkt ' + X.offlineChanges());
+  X.setWire('/ch/01/mix/fader', 'f', 0.75);
+  check('Zurück auf den Startwert = keine Änderung mehr (2 gemerkt)', X.offlineChanges() === 2);
+  X.setWire('/ch/01/mix/fader', 'f', 0.4);
+  const w = X.offlineWrites();
+  check('Übertragungsliste: Pfad, Typ (f/f/s) und Rohwert', w.length === 3 && w.some((x) => x[0] === '/ch/01/config/name' && x[1] === 's' && x[2] === 'Kick') && w.some((x) => x[0] === '/ch/01/eq/2/g' && x[1] === 'f' && near(x[2], 0.7, 1e-9)) && w.some((x) => x[0] === '/ch/01/mix/fader' && x[1] === 'f' && x[2] === 0.4), JSON.stringify(w));
+  await sleep(450);
+  const stored = JSON.parse(localStorage.getItem('x32.offline'));
+  check('Offline-Stand wird im lokalen Speicher abgelegt (überlebt Neustart)', stored && stored.v === 1 && Object.keys(stored.changed).length === 3 && stored.changed['/ch/01/config/name'] === 'Kick');
+  X.leaveOffline();
+  check('Offline beenden: Status "idle", Werte geleert, Änderungen bleiben gemerkt', X.status().state === 'idle' && !X.isOffline() && X.get('/ch/01/mix/fader') === undefined && X.offlineChanges() === 3);
+  X.enterOffline(); X.want(['/ch/01/mix/fader', '/ch/01/config/name', '/ch/02/mix/fader']);
+  check('Wieder offline: gemerkte Werte kommen zurück, andere bleiben Startwert', X.get('/ch/01/mix/fader') === 0.4 && X.get('/ch/01/config/name') === 'Kick' && X.get('/ch/02/mix/fader') === 0.75);
+  X.clearOffline();
+  check('Zurücksetzen: alles weg, Werte werden neu geladen', X.offlineChanges() === 0 && X.get('/ch/01/mix/fader') === undefined);
+  X.want(['/ch/01/mix/fader']);
+  check('nach dem Zurücksetzen: Startwert', X.get('/ch/01/mix/fader') === 0.75);
+  X.leaveOffline(); un();
+  __sent.length = 0; X.setWire('/ch/01/mix/fader', 'f', 0.2);
+  check('Nach dem Verlassen geht es wieder zum Pult', __sent.length === 1 && X.offlineChanges() === 0);
+  out.push(fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>

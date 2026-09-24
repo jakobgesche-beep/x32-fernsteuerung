@@ -94,7 +94,7 @@ const Scenes = (function () {
   function render() {
     if (!overlay) return;
     const body = overlay.querySelector('.scenes-body');
-    const online = X.status().state === 'online';
+    const online = X.isLive();
     const scenes = list().slice().reverse();
     const backup = load(BACKUP_KEY, null);
     body.innerHTML = '';
@@ -112,7 +112,7 @@ const Scenes = (function () {
       render();
     });
     body.appendChild(row);
-    if (!online) body.appendChild(el('<p class="scenes-help warn">Zum Speichern und Laden muss die App mit dem Pult verbunden sein.</p>'));
+    if (!online) body.appendChild(el('<p class="scenes-help warn">Zum Speichern und Laden muss die App mit dem Pult verbunden sein (oder im Offline-Modus).</p>'));
     if (backup) {
       const u = el('<div class="scene-undo"><span>Zuletzt geladen: „' + esc(backup.name) + '“ (' + fmtTime(backup.time) + ')</span><button class="btn secondary small">Rückgängig</button></div>');
       u.querySelector('button').addEventListener('click', async () => { const r = await undo(); toast(r.ok ? 'Alter Stand wiederhergestellt (' + r.changed + ' Werte).' : 'Nichts zum Rückgängigmachen.'); render(); });

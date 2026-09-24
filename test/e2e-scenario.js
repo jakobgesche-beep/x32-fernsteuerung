@@ -379,12 +379,57 @@ window.__mockInit = (mock) => {
     check('Werkzeuge: Übersicht ausgeblendet', ovEl.hidden);
     document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
     check('zurück zum Pult: Übersicht und Fader wieder da', !ovEl.hidden && !document.getElementById('console').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
+    // Offline-Modus (ohne Pult arbeiten, später übertragen)
+    try { localStorage.removeItem('x32.offline'); } catch(e){}
+    X.clearOffline();
+    document.getElementById('connect-btn').click();                 // "Trennen"
+    await waitFor(() => X.status().state === 'idle', 3000);
+    check('Offline: Start ohne Pult zeigt den Knopf "Offline arbeiten" im Hinweis', getComputedStyle(document.getElementById('connect-hint')).display !== 'none' && !!document.getElementById('hint-offline-btn'));
+    document.getElementById('hint-offline-btn').click();
+    await waitFor(() => X.status().state === 'offline', 3000); await sleep(200);
+    const pill = document.getElementById('status-badge');
+    check('Offline: Status "Offline-Modus" (lila), Pult-Fläche nicht gedimmt, Hinweisleiste da', /Offline-Modus/.test(document.getElementById('status-text').textContent) && pill.classList.contains('offline-mode') && !document.getElementById('console').classList.contains('offline') && !document.getElementById('offline-bar').hidden && /Offline-Modus/.test(document.getElementById('offline-bar').textContent) && document.getElementById('offline-btn').textContent === 'Offline beenden');
+    setLayer('ch'); await sleep(200);
+    const o1 = stripUI['ch01'];
+    check('Offline: alle 32 Kanalzüge da, Fader auf 0,0 dB, nicht stumm', Object.keys(stripUI).length === 32 && o1.dbLabel.textContent === '0.0' && Math.abs(parseFloat(o1.fader.value) - 0.75) < 0.001 && !o1.wrap.classList.contains('muted'));
+    const sentBefore = __ctl.mock ? __ctl.mock.log.received : 0;
+    X.setWire('/ch/01/mix/fader', 'f', 0.3); X.setWire('/ch/03/mix/on', 'i', 0); await sleep(150);
+    check('Offline: Fader und Mute lassen sich bedienen, Anzeige folgt, nichts geht ans Pult', Math.abs(parseFloat(o1.fader.value) - 0.3) < 0.001 && stripUI['ch03'].wrap.classList.contains('muted') && X.offlineChanges() === 2 && (!__ctl.mock || __ctl.mock.log.received === sentBefore), 'Änderungen ' + X.offlineChanges());
+    openDetail(STRIP_BY_ID['ch01']); await sleep(300);
+    check('Offline: EQ-Seite öffnet mit Startwerten (Band 1: 100 Hz)', !!document.querySelector('.proc-card') && Math.abs(X.actual('/ch/01/eq/1/f') - 100) < 0.01 && X.get('/ch/01/dyn/on') === 0);
+    X.set('/ch/01/eq/2/g', 5); closeDetail(); await sleep(100);
+    check('Offline: EQ-Änderung wird gemerkt (3 Änderungen)', X.offlineChanges() === 3);
+    Scenes.open(); await sleep(150);
+    const sb = document.querySelector('#scenes-overlay .scene-save-btn');
+    check('Offline: Szenen lassen sich speichern (Knopf aktiv)', sb && !sb.disabled);
+    document.querySelector('#scenes-overlay .scene-name').value = 'Offline A'; sb.click(); await sleep(100);
+    check('Offline: Szene gespeichert, Mute von Kanal 3 darin', Scenes.list().some((x) => x.name === 'Offline A' && x.data.ch03.on === 0 && x.data.ch01.f === 0.3));
+    Scenes.close();
+    await sleep(700);
+    check('Offline: Übersicht zählt stumme Kanäle', parseInt(document.getElementById('ov-muted').textContent, 10) === 1 && document.getElementById('ov-signal').textContent === '–');
+    // verbinden: Offline-Stand wartet auf die Übertragung
+    document.getElementById('ip-input').value = '10.0.0.5'; document.getElementById('connect-btn').click();
+    await waitFor(() => X.status().state === 'online' && X.status().progress >= 1, 10000); await sleep(300);
+    const ob = document.getElementById('offline-bar');
+    check('Verbunden: Werte kommen vom Pult (Offline-Werte weg), Hinweis "Offline vorbereitet: 3"', !X.isOffline() && Math.abs(parseFloat(stripUI['ch01'].fader.value) - 0.3) > 0.01 && !ob.hidden && /Offline vorbereitet: 3 Einstellungen/.test(ob.textContent), ob.textContent.slice(0, 60));
+    ob.querySelector('.btn').click(); await sleep(100);
+    check('Übertragen: Rückfrage nennt die Anzahl und warnt vor springenden Fadern', !!document.getElementById('offline-dialog') && /3 Werte/.test(document.getElementById('offline-dialog').textContent) && /springen/.test(document.getElementById('offline-dialog').textContent));
+    Array.from(document.querySelectorAll('#offline-dialog .btn')).find((b) => /Ja, übertragen/.test(b.textContent)).click();
+    await waitFor(() => /Fertig/.test((document.getElementById('offline-dialog') || {}).textContent || ''), 5000);
+    const ms = __ctl.mock.store;
+    check('Übertragen: Fader, Mute und EQ-Gain stehen am (simulierten) Pult', Math.abs(ms.get('/ch/01/mix/fader') - 0.3) < 0.001 && ms.get('/ch/03/mix/on') === 0 && Math.abs(ms.get('/ch/01/eq/2/g') - (5 + 15) / 30) < 0.001, ms.get('/ch/01/mix/fader') + ' / ' + ms.get('/ch/03/mix/on') + ' / ' + ms.get('/ch/01/eq/2/g'));
+    check('Übertragen: Meldung "Fertig: 3 Werte"', /Fertig: 3 Werte/.test(document.getElementById('offline-dialog').textContent));
+    document.querySelector('#offline-dialog .btn').click(); await sleep(50);
+    Array.from(document.querySelectorAll('#offline-bar .btn')).find((b) => /Verwerfen/.test(b.textContent)).click(); await sleep(50);
+    Array.from(document.querySelectorAll('#offline-dialog .btn')).find((b) => /Ja, verwerfen/.test(b.textContent)).click(); await sleep(150);
+    check('Verwerfen: Offline-Stand gelöscht, Hinweisleiste weg', X.offlineChanges() === 0 && document.getElementById('offline-bar').hidden && !document.getElementById('offline-dialog'));
     out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');
     const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n');
     return;
   }
 
   // ---- Ansichten für Screenshots ----
+  if(view === 'offlinemode'){ document.getElementById('connect-btn').click(); await waitFor(() => X.status().state === 'idle', 3000); await enterOffline(); X.setWire('/ch/01/mix/fader', 'f', 0.62); X.setWire('/ch/03/mix/on', 'i', 0); await sleep(700); }
   if(view === 'tools') showView('tools');
   if(view === 'scenes'){ try { localStorage.removeItem('x32.scenes'); } catch(e){} Scenes.saveScene('Soundcheck', true); X.setWire('/ch/01/mix/fader', 'f', 0.3); Scenes.saveScene('Band A – Bühne', false); Scenes.open(); }
   if(view === 'clip'){ const m1 = STRIP_BY_ID['ch01'].meter, f = new Float32Array(70); f[m1.idx[0]] = 1.0; __ctl.emitMeter(m1.stream, f); f[m1.idx[0]] = 0.35; __ctl.emitMeter(m1.stream, f); }
