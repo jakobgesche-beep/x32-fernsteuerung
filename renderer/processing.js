@@ -280,7 +280,7 @@ function buildEqPage(){
   const hpBtn = makeXButton('', () => setMiscLocal('hpOn', proc.misc.hpOn ? 0 : 1), 'hp-btn');
   hpBtn.innerHTML = '<svg viewBox="0 0 24 18" width="26" height="20"><path d="M2 16 L9 16 C11 16 12 4 15 4 L22 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
   const hpInput = el('<input type="number" min="20" max="400" step="1">');
-  hpInput.addEventListener('change', () => setMiscLocal('hpf', clamp(parseFloat(hpInput.value) || 20, 20, 400)));
+  hpInput.addEventListener('change', () => { setMiscLocal('hpf', clamp(parseFloat(hpInput.value) || 20, 20, 400)); hpInput.blur(); });
   const hpSlope = el('<select></select>');
   HP_SLOPES.forEach((s, i) => hpSlope.appendChild(el('<option value="' + i + '">' + s + ' dB/Okt</option>')));
   hpSlope.addEventListener('change', () => setMiscLocal('hpSlope', parseInt(hpSlope.value, 10)));
@@ -306,7 +306,7 @@ function buildEqPage(){
       const row = el('<label class="eq-row"><span>' + label + '</span></label>');
       const input = el('<input type="number" ' + attrs + '>');
       input.addEventListener('focus', () => { proc.sel = b; });
-      input.addEventListener('change', () => { const v = parse(input.value); if(!isNaN(v)) setEqLocal(b, field, v); });
+      input.addEventListener('change', () => { const v = parse(input.value); if(!isNaN(v)) setEqLocal(b, field, v); input.blur(); });
       row.appendChild(input);
       row.appendChild(el('<em>' + unit + '</em>'));
       return { row, input };

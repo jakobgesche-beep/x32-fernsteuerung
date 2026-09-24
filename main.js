@@ -70,11 +70,16 @@ function connect(ip) {
     disconnect();
     const sock = dgram.createSocket("udp4");
     socket = sock;
-    sock.on("error", (err) => log("Netzwerkfehler: " + err.message));
+    let ready = false;
+    sock.on("error", (err) => {
+      log("Netzwerkfehler: " + err.message);
+      if (!ready) resolve({ ok: false, error: err.message });
+    });
     sock.on("message", (msg) => {
       if (client) client.receive(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
     });
     sock.bind(() => {
+      ready = true;
       client = new X32Client({
         send: (u8) => { try { sock.send(u8, X32_PORT, ip); } catch (e) {} },
         onBatch: (entries) => toRenderer("x32-batch", entries),
@@ -95,8 +100,8 @@ ipcMain.handle("x32-connect", (event, ip) => connect(String(ip)));
 ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }; });
 ipcMain.handle("x32-snapshot", async () => (client ? client.snapshot() : []));
 // Häufige, schnelle Aufrufe ohne Antwort (ipcRenderer.send), damit die Übertragung so kurz wie möglich bleibt
-ipcMain.on("x32-set", (event, path, type, value) => {
-  if (client && validPath(path) && "fis".includes(type)) client.set(path, type, value);
+ipcMain.on("x32-set", (event, oscPath, type, value) => {
+  if (client && validPath(oscPath) && ["f", "i", "s"].includes(type)) client.set(oscPath, type, value);
 });
 ipcMain.on("x32-want", (event, paths) => { if (client && validPaths(paths)) client.want(paths); });
 ipcMain.on("x32-hot", (event, paths) => { if (client && validPaths(paths)) client.setHot(paths); });

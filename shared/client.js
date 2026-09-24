@@ -92,7 +92,7 @@
       this.lastStatus = t;
       const open = this.queue.length + this.inflight.size;
       const progress = this.syncTotal > 0 ? Math.max(0, Math.min(1, 1 - open / this.syncTotal)) : 1;
-      this.onStatus({ state: this.state, info: this.info, rtt: this.rtt, open, progress, stats: this.stats });
+      this.onStatus({ state: this.state, info: this.info, rtt: this.rtt, open, progress, stats: this.stats, known: this.known.size, cached: this.values.size, dead: Array.from(this.dead).slice(0, 40) });
     }
     log(msg) { this.onLog(msg); }
 

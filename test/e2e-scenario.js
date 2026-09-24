@@ -77,6 +77,28 @@ window.__mockInit = (mock) => {
     const seen = await waitFor(() => Math.abs(parseFloat(stripUI['ch08'].fader.value) - 0.3) < 1e-4, 500);
     check('Fader am Pult bewegt: App folgt', seen, seen ? ((performance.now() - ts).toFixed(0) + ' ms, Anzeige ' + stripUI['ch08'].dbLabel.textContent + ' dB') : '');
 
+    // Diagnose-Fenster
+    document.getElementById('status-badge').click(); await sleep(150);
+    const diagText = diagOverlay ? diagOverlay.textContent : '';
+    check('Diagnose-Fenster zeigt Pult, Ping und Zähler', /X32C/.test(diagText) && /Ping/.test(diagText) && /Pakete gesendet/.test(diagText) && /X32-MOCK/.test(diagText), diagText.replace(/\s+/g, ' ').slice(0, 120));
+    diagOverlay.querySelector('.close-btn').click();
+    check('Diagnose-Fenster lässt sich schließen', diagOverlay === null);
+
+    // Regressionstest: Fader angeklickt (behält Fokus), danach am Pult verschoben -> App muss folgen
+    const fe = stripUI['ch09'].fader; fe.focus();
+    fe.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointerup'));
+    __ctl.mock.surfaceChange('/ch/09/mix/fader', 0.25);
+    const follow = await waitFor(() => Math.abs(parseFloat(fe.value) - 0.25) < 1e-4, 500);
+    check('angeklickter Fader folgt weiter dem Pult (kein Fokus-Problem)', follow && document.activeElement === fe, 'Wert ' + fe.value);
+    // während des Ziehens wird die Anzeige nicht vom Pult überschrieben
+    fe.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    fe.value = 0.9; fe.dispatchEvent(new Event('input', { bubbles: true }));
+    __ctl.mock.surfaceChange('/ch/09/mix/fader', 0.1);
+    await sleep(80);
+    check('beim Ziehen bleibt der Schieber unter dem Finger', Math.abs(parseFloat(fe.value) - 0.9) < 1e-4, 'Wert ' + fe.value);
+    window.dispatchEvent(new PointerEvent('pointerup'));
+
     // Ebenen
     setLayer('bus'); await sleep(400);
     check('Bus-Ebene: 16 Züge, Namen', Object.keys(stripUI).length === 16 && stripUI['bus03'].name.textContent === 'Mon 3', Object.keys(stripUI).length + ' / ' + stripUI['bus03'].name.textContent);
@@ -131,6 +153,7 @@ window.__mockInit = (mock) => {
   }
 
   // ---- Ansichten für Screenshots ----
+  if(view === 'diag'){ document.getElementById('status-badge').click(); await sleep(400); }
   if(['aux', 'bus', 'mtx', 'dca'].includes(view)) setLayer(view);
   if(view.startsWith('eq-') || view.startsWith('dyn-')){
     const id = { 'eq-ch2': 'ch02', 'eq-bus3': 'bus03', 'eq-main': 'st', 'dyn-bus3': 'bus03', 'dyn-ch2': 'ch02' }[view];

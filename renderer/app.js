@@ -53,7 +53,46 @@ function updateStatus(s){
   if(st === 'lost' && lastState !== 'lost') toast('Verbindung zum Pult verloren – die App versucht es automatisch weiter.', true);
   lastState = st;
 }
-X.onStatus(updateStatus);
+let diagOverlay = null;
+X.onStatus((s) => { updateStatus(s); if(diagOverlay) renderDiagnostics(s); });
+
+// Verbindungs-Diagnose (Klick auf den Status-Balken)
+function diagRow(k, v){ return '<div class="diag-k">' + esc(k) + '</div><div class="diag-v">' + esc(v) + '</div>'; }
+function renderDiagnostics(s){
+  const st = s.stats || {};
+  const info = s.info || {};
+  const stateText = { idle: 'nicht verbunden', connecting: 'verbinde', online: 'online', lost: 'Verbindung verloren' }[s.state] || s.state;
+  diagOverlay.querySelector('.diag-body').innerHTML =
+    diagRow('Zustand', stateText) +
+    diagRow('Pult', [info.model, info.name].filter(Boolean).join(' · ') || '–') +
+    diagRow('Firmware', info.version || '–') +
+    diagRow('Pult-IP', info.ip || '–') +
+    diagRow('Ping', s.rtt != null ? Math.round(s.rtt) + ' ms' : '–') +
+    diagRow('Bekannte / geladene Werte', (s.known || 0) + ' / ' + (s.cached || 0)) +
+    diagRow('Offene Anfragen', String(s.open || 0)) +
+    diagRow('Pakete gesendet / empfangen', (st.sent || 0) + ' / ' + (st.received || 0)) +
+    diagRow('Anfragen wiederholt', String(st.retries || 0)) +
+    diagRow('Anfragen aufgegeben', String(st.failed || 0)) +
+    diagRow('Änderungen gesendet', String(st.writes || 0)) +
+    diagRow('Verlorene Änderungen erneut gesendet', String(st.resends || 0)) +
+    diagRow('Pfade ohne Antwort vom Pult', (s.dead || []).length ? s.dead.join(', ') : 'keine');
+}
+function showDiagnostics(){
+  if(diagOverlay) return;
+  diagOverlay = el('<div class="overlay"></div>');
+  const box = el('<div class="detail-card" style="max-width:520px;"><div class="detail-header"><div class="detail-title">Verbindungs-Diagnose</div></div><div class="diag-body diag-grid"></div><p class="hint">Bei Problemen hilft ein Foto dieses Fensters.</p></div>');
+  const closeBtn = el('<button class="close-btn">&times;</button>');
+  const close = () => { diagOverlay.remove(); diagOverlay = null; };
+  closeBtn.addEventListener('click', close);
+  box.querySelector('.detail-header').appendChild(closeBtn);
+  diagOverlay.appendChild(box);
+  diagOverlay.addEventListener('click', (e) => { if(e.target === diagOverlay) close(); });
+  document.body.appendChild(diagOverlay);
+  renderDiagnostics(X.status());
+}
+statusBadge.style.cursor = 'pointer';
+statusBadge.title = 'Verbindungs-Diagnose anzeigen';
+statusBadge.addEventListener('click', showDiagnostics);
 
 // alle Kanäle laden: sichtbare Ebene zuerst
 function wantAll(){
@@ -155,6 +194,7 @@ function buildStrip(strip){
     dbLabel.textContent = v <= 0 ? '-oo' : fmt(X32V.faderToDb(v), 1);
     X.setWire(faderPath, 'f', v);
   });
+  fader.addEventListener('pointerdown', () => { ui.dragging = true; });
   fader.addEventListener('dblclick', () => X.setWire(faderPath, 'f', 0.75));
   muteBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -181,7 +221,7 @@ function paintStrip(ui){
   if(iconId !== ui.iconId){ ui.iconId = iconId; ui.icon.innerHTML = iconId ? X32Icons.svg(iconId, 26) : ''; }
   const f = X.get(ui.faderPath);
   if(f !== undefined){
-    if(document.activeElement !== ui.fader) ui.fader.value = f;
+    if(!ui.dragging) ui.fader.value = f;
     ui.dbLabel.textContent = f <= 0 ? '-oo' : fmt(X32V.faderToDb(f), 1);
   }
   const on = X.get(ui.onPath);
@@ -189,6 +229,10 @@ function paintStrip(ui){
   ui.wrap.classList.toggle('muted', muted);
   ui.muteBtn.classList.toggle('active', muted);
 }
+
+// Loslassen beendet das Ziehen bei allen Schiebern (auch wenn der Zeiger außerhalb losgelassen wird)
+window.addEventListener('pointerup', () => { for(const sid in stripUI) stripUI[sid].dragging = false; });
+window.addEventListener('pointercancel', () => { for(const sid in stripUI) stripUI[sid].dragging = false; });
 
 function setLayer(id){
   currentLayer = id;

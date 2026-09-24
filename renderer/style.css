@@ -215,3 +215,7 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .eq-controls.dense .eq-row em{grid-area:u;font-size:10px;}
 .eq-controls.dense .eq-row input,.eq-controls.dense .eq-row select{grid-area:i;grid-column:1 / span 2;}
 .eq-controls.dense .eq-col{padding-left:7px;}
+
+.diag-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px;}
+.diag-k{color:var(--muted);}
+.diag-v{color:var(--text);font-family:var(--font-mono);font-size:12px;word-break:break-word;}
