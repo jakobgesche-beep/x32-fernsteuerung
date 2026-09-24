@@ -146,9 +146,22 @@ gezogener Fader am Pult hinterherhinkt (alle Werte in Millisekunden):
 | WLAN schlecht (15 % Verlust) | 208 / 623 | 160 |
 | sehr langsames Pult (150 Nachrichten/s) | 8 / 11 | 15 |
 
-Das sind Simulationswerte (Netzlaufzeit ist darin enthalten). Am echten Pult
-bestimmt vor allem das WLAN die Werte; der Netzwerk-Test in der Diagnose zeigt
-sie direkt.
+Das sind Simulationswerte (Netzlaufzeit ist darin enthalten, dazu die 4-ms-
+Taktung der Test-Uhr). Am echten Pult bestimmt vor allem das Netz die Werte;
+der Netzwerk-Test in der Diagnose zeigt sie direkt. Die Diagnose zeigt außerdem
+die App-interne Verzögerung (von der Bewegung in der Oberfläche bis zum
+Netzwerk-Paket), gemessen auf dem eigenen Rechner.
+
+Was die App selbst tut, damit nichts ausgebremst wird: keine Drosselung bei
+verdecktem Fenster (App Nap / Chromium-Hintergrund-Drosselung aus), Schlafmodus
+wird während der Verbindung verhindert, Änderungen gehen sofort und danach
+höchstens alle 10 ms je Parameter (immer mit dem neuesten Wert) ans Pult.
+
+Tipps für kurze Zeiten: Mac und Pult am selben Router, wenn möglich 5 GHz und
+kurzer Abstand oder Kabel/USB-C-LAN-Adapter zum Router; AirDrop und Handoff am
+Mac ausschalten (stören das WLAN gelegentlich); der Router nur für die Anlage.
+Unter etwa 50 ms fühlt sich nichts mehr verzögert an – der Motor-Fader am Pult
+selbst braucht ohnehin länger.
 
 ## Ungetestet an echter Hardware
 

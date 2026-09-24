@@ -13,7 +13,7 @@
 //  - schnelles Nachfragen als Sicherheitsnetz: Mute alle 0,5 s, Fader alle 1 s (sichtbare Kanäle),
 //    verlorene Pult-Meldungen fallen so spätestens nach ~0,5 s auf. Meldet das Pult von selbst
 //    nichts (nur Nachfragen findet Änderungen), wird doppelt so schnell nachgefragt.
-//  - eigene Änderungen: sofort lokal, sofort zum Pult (danach höchstens ~60 Pakete/s je Parameter,
+//  - eigene Änderungen: sofort lokal, sofort zum Pult (danach höchstens ~100 Pakete/s je Parameter,
 //    immer mit dem neuesten Wert), Vorrang vor allen Hintergrundanfragen, danach ein Kontroll-Lesen;
 //    stimmt der Wert am Pult nicht (Paket verloren), wird er automatisch erneut gesendet
 //  - Anfragen in einem Fenster (max. 20 gleichzeitig offen, Timeout + Wiederholung)
@@ -26,7 +26,7 @@
   const REQUEST_TIMEOUT = 500;    // ms bis zur Wiederholung
   const MAX_TRIES = 3;
   const TICK_MS = 5;
-  const WRITE_INTERVAL = 16;      // ms zwischen zwei Schreibzugriffen auf denselben Parameter (~60/s)
+  const WRITE_INTERVAL = 10;      // ms zwischen zwei Schreibzugriffen auf denselben Parameter (~100/s)
   const WRITE_QUIET = 400;        // so lange nach dem letzten Schreiben ruhen Hintergrundanfragen
   const VERIFY_DELAY = 300;       // ms nach dem letzten Schreiben bis zum Kontroll-Lesen
   const VERIFY_GIVEUP = 1500;
@@ -39,7 +39,7 @@
   const POLL_OTHER = 2000;
   const MAX_POLL_QUEUE = 120;
   const ALL_EVERY = 60000;        // Nachgleich aller bekannten Werte
-  const BATCH_GAP = 8;            // frühestens alle 8 ms eine Meldung an die Oberfläche (sonst sofort)
+  const BATCH_GAP = 4;            // frühestens alle 4 ms eine Meldung an die Oberfläche (sonst sofort)
   const FAILED_RETRY_EVERY = 2000;
   const MAX_FAIL_ROUNDS = 6;
   const LOST_TOLERANCE = 0.02;    // Abweichung (normiert), ab der eine Änderung als verloren gilt
@@ -103,6 +103,7 @@
       this.syncTotal = 0;
       this.pushHits = []; this.pollHits = []; this.pushBroken = false;
       this.netTest = null;
+      this.ipcLat = []; this.paceLat = [];
       this.stats = { sent: 0, received: 0, retries: 0, failed: 0, writes: 0, resends: 0, pushChanges: 0, pollChanges: 0, hintFound: 0 };
     }
 
@@ -149,11 +150,19 @@
       this.onStatus({
         state: this.state, info: this.info, rtt: this.rtt, rttStats: this.rttStats(), loss: this.pingLossPct(),
         open, progress, stats: this.stats, known: this.known.size, cached: this.values.size,
-        dead: Array.from(this.dead).slice(0, 40), pushBroken: this.pushBroken,
+        dead: Array.from(this.dead).slice(0, 40), pushBroken: this.pushBroken, appLatency: this.appLatencyStats(),
         hints: { active: this.subs.size > 0 && !this.hint.disabled, disabled: this.hint.disabled, found: this.stats.hintFound, ok: this.hint.ok, bad: this.hint.bad },
       });
     }
     log(msg) { this.onLog(msg); }
+
+    // Eigene App-Verzögerung (gemessen auf diesem Rechner): Übergabe Oberfläche -> Netzwerkschicht und Wartezeit im Sendetakt
+    noteAppLatency(ms) { this.ipcLat.push(Math.max(0, Math.min(1000, ms))); if (this.ipcLat.length > 200) this.ipcLat.shift(); }
+    appLatencyStats() {
+      const stat = (a) => (a.length ? { avg: a.reduce((x, y) => x + y, 0) / a.length, max: Math.max(...a) } : null);
+      const i = stat(this.ipcLat), p = stat(this.paceLat);
+      return i || p ? { ipc: i, pace: p, n: this.ipcLat.length } : null;
+    }
 
     // ---------- Empfang ----------
     receive(u8) {
@@ -361,8 +370,8 @@
       let w = this.pending.get(path);
       if (!w && this.values.get(path) === value) return true;
       this.values.set(path, value);
-      if (!w) { w = { type, value, lastSent: 0, dirty: true, lastWrite: t, verifying: false, verifyAt: 0, retries: 0, timer: null }; this.pending.set(path, w); }
-      else { w.type = type; w.value = value; w.dirty = true; w.lastWrite = t; w.verifying = false; w.retries = 0; }
+      if (!w) { w = { type, value, lastSent: 0, dirty: true, dirtySince: t, lastWrite: t, verifying: false, verifyAt: 0, retries: 0, timer: null }; this.pending.set(path, w); }
+      else { w.type = type; w.value = value; if (!w.dirty) w.dirtySince = t; w.dirty = true; w.lastWrite = t; w.verifying = false; w.retries = 0; }
       this.flushWrite(path, w, t);
       return true;
     }
@@ -374,6 +383,7 @@
         return;
       }
       w.dirty = false; w.lastSent = t;
+      if (w.dirtySince) { this.paceLat.push(t - w.dirtySince); if (this.paceLat.length > 200) this.paceLat.shift(); }
       this.stats.writes++;
       this.transmit(path, [{ type: w.type, value: w.value }]);
     }

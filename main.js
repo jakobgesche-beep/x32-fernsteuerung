@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker } = require("electron");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -10,6 +10,17 @@ const OSC = require("./shared/osc");
 const X32Client = require("./shared/client");
 
 const X32_PORT = 10023;
+
+// Live-Betrieb: macOS ("App Nap") und Chromium drosseln Programme mit verdecktem/minimiertem Fenster,
+// dann laufen Timer viel langsamer und Mute/Fader kämen verzögert an. Das schalten wir ab.
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+let sleepBlockerId = null;
+function keepAwake(on) {
+  if (on && sleepBlockerId === null) sleepBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!on && sleepBlockerId !== null) { powerSaveBlocker.stop(sleepBlockerId); sleepBlockerId = null; }
+}
 
 let mainWindow = null;
 let socket = null;
@@ -61,6 +72,7 @@ ipcMain.handle("x32-scan", async () => {
 
 // ---------- Verbindung zum Pult ----------
 function disconnect() {
+  keepAwake(false);
   if (client) { client.stop(); client = null; }
   if (socket) { try { socket.close(); } catch (e) {} socket = null; }
 }
@@ -68,6 +80,7 @@ function disconnect() {
 function connect(ip) {
   return new Promise((resolve) => {
     disconnect();
+    keepAwake(true);
     const sock = dgram.createSocket("udp4");
     socket = sock;
     let ready = false;
@@ -105,7 +118,8 @@ ipcMain.handle("x32-connect", (event, ip) => connect(String(ip)));
 ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }; });
 ipcMain.handle("x32-snapshot", async () => (client ? client.snapshot() : []));
 // Häufige, schnelle Aufrufe ohne Antwort (ipcRenderer.send), damit die Übertragung so kurz wie möglich bleibt
-ipcMain.on("x32-set", (event, oscPath, type, value) => {
+ipcMain.on("x32-set", (event, oscPath, type, value, sentAt) => {
+  if (client && typeof sentAt === "number") client.noteAppLatency(Date.now() - sentAt);
   const okValue = type === "s" ? typeof value === "string" && value.length <= 24 : typeof value === "number" && Number.isFinite(value);
   if (client && validPath(oscPath) && ["f", "i", "s"].includes(type) && okValue) client.set(oscPath, type, value);
 });
@@ -128,7 +142,7 @@ function createWindow() {
     width: 1200,
     height: 820,
     backgroundColor: "#0D1117",
-    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 }

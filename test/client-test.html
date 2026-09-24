@@ -52,8 +52,8 @@ async function waitFor(fn, timeout) { const t0 = Date.now(); while (Date.now() -
   const elapsed = Date.now() - tw0;
   await sleep(700);
   const rec = r.mock.log.sets.get(path);
-  const sent = rec.count - before, maxExpected = Math.ceil(elapsed / 12) + 6;
-  check('T3 Schreiben gebündelt (max. ~80/s)', sent <= maxExpected && sent >= 20, sent + ' Pakete für 200 Bewegungen in ' + elapsed + ' ms (erlaubt bis ' + maxExpected + ')');
+  const sent = rec.count - before, maxExpected = Math.ceil(elapsed / X32Client.constants.WRITE_INTERVAL) + 6;
+  check('T3 Schreiben gebündelt (max. ~100/s)', sent <= maxExpected && sent >= 20, sent + ' Pakete für 200 Bewegungen in ' + elapsed + ' ms (erlaubt bis ' + maxExpected + ')');
   check('T3 Endwert am Pult korrekt', Math.abs(rec.last - 1) < 1e-6, 'Pult ' + rec.last);
   check('T3 Kontroll-Lesen ohne Korrektur (Wert unverändert)', r.client.get(path) === 1 && r.client.pending.size === 0, 'pending ' + r.client.pending.size);
 

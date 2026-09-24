@@ -74,6 +74,7 @@ function renderDiagnostics(s){
     diagRow('Firmware', info.version || '–') +
     diagRow('Pult-IP', info.ip || '–') +
     diagRow('Ping (Ø / 95 % / max)', s.rttStats ? Math.round(s.rttStats.avg) + ' / ' + Math.round(s.rttStats.p95) + ' / ' + Math.round(s.rttStats.max) + ' ms' : '–') +
+    diagRow('App-interne Verzögerung (Eingabe → Netzwerk)', s.appLatency ? 'Ø ' + ((s.appLatency.ipc ? s.appLatency.ipc.avg : 0) + (s.appLatency.pace ? s.appLatency.pace.avg : 0)).toFixed(1) + ' ms, max ' + Math.round((s.appLatency.ipc ? s.appLatency.ipc.max : 0) + (s.appLatency.pace ? s.appLatency.pace.max : 0)) + ' ms (' + s.appLatency.n + ' Bewegungen)' : 'noch nichts bewegt') +
     diagRow('Paketverlust (Ping)', s.loss != null ? Math.round(s.loss) + ' %' : '–') +
     diagRow('Pult meldet Änderungen selbst', st.pushChanges > 0 ? 'ja (' + st.pushChanges + ' erhalten)' : s.pushBroken ? 'nein – es wird schneller nachgefragt' : 'noch keine Änderung am Pult beobachtet') +
     diagRow('Schnappschüsse (Sicherheitsnetz)', s.hints ? (s.hints.disabled ? 'abgeschaltet (Format passte nicht)' : s.hints.active ? 'aktiv, ' + s.hints.found + ' verlorene Meldungen aufgefangen' : 'aus') : '–') +
@@ -100,7 +101,8 @@ async function runNetTest(){
   const verdict = good ? 'Sehr gut: Fader und Mute laufen praktisch verzögerungsfrei.'
     : ok ? 'Brauchbar: kleine Verzögerungen möglich. Näher an den Router gehen oder das 5-GHz-Netz nutzen hilft.'
     : 'Schlecht: Pakete gehen verloren oder kommen spät an. Kabel zum Router oder 5-GHz-WLAN in kurzer Entfernung nutzen.';
-  out.innerHTML = '<div class="net-verdict ' + (good ? 'good' : ok ? 'mid' : 'bad') + '">' + esc(verdict) + '</div>' +
+  const tip = good ? '' : ' Tipp: AirDrop und Handoff am Mac ausschalten (können das WLAN alle paar Sekunden kurz stören) und andere Netzwerk-Programme schließen.';
+  out.innerHTML = '<div class="net-verdict ' + (good ? 'good' : ok ? 'mid' : 'bad') + '">' + esc(verdict + tip) + '</div>' +
     '<div class="diag-grid">' +
     diagRow('Einzelanfragen beantwortet', q.got + ' von ' + q.sent + ' (' + Math.round(q.lossPct) + ' % Verlust)') +
     diagRow('Laufzeit Ø / min / max', q.got ? Math.round(q.avg) + ' / ' + Math.round(q.min) + ' / ' + Math.round(q.max) + ' ms' : '–') +

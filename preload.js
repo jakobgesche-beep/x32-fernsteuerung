@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld("x32API", {
   disconnect: () => ipcRenderer.invoke("x32-disconnect"),
   snapshot: () => ipcRenderer.invoke("x32-snapshot"),
   // Werte (ohne Antwort, damit es schnell bleibt)
-  set: (path, type, value) => ipcRenderer.send("x32-set", path, type, value),
+  set: (path, type, value) => ipcRenderer.send("x32-set", path, type, value, Date.now()),
   want: (paths) => ipcRenderer.send("x32-want", paths),
   setHot: (paths) => ipcRenderer.send("x32-hot", paths),
   setSubs: (specs) => ipcRenderer.send("x32-subs", specs),
