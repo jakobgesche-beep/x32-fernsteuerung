@@ -219,6 +219,7 @@ function createWindow() {
     backgroundColor: "#0D1117",
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);          // kein Zoomen mit zwei Fingern (Fader nicht versehentlich verstellen)
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 

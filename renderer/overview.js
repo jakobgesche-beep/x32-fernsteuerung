@@ -35,7 +35,8 @@ const Overview = (function () {
     bar.querySelector('.ov-toggle').addEventListener('click', () => {
       const c = root.classList.toggle('collapsed');
       try { localStorage.setItem('x32.overview.collapsed', c ? '1' : '0'); } catch (e) {}
-      if (!c) setTimeout(() => { Measure.redraw(); }, 0);
+      autoCollapsedOverview = false;
+      setTimeout(() => { if (!c) Measure.redraw(); if (typeof fitFaders === 'function') fitFaders(); }, 0);
     });
     try { if (localStorage.getItem('x32.overview.collapsed') === '1') root.classList.add('collapsed'); } catch (e) {}
     Measure.init(live);

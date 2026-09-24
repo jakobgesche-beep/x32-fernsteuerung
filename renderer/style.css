@@ -84,11 +84,11 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .strip-icon{height:26px;display:flex;align-items:center;justify-content:center;}
 .strip-name{font-size:10.5px;text-align:center;line-height:1.15;max-height:24px;overflow:hidden;font-weight:600;word-break:break-word;}
 .meter-fader-row{display:flex;gap:4px;align-items:flex-end;}
-.meter-track{width:9px;height:210px;background:linear-gradient(180deg, #E1604C 0%, #E8C23D 12%, var(--accent) 32%, var(--accent-2) 100%);border:1px solid var(--line);border-radius:5px;position:relative;overflow:hidden;}
+.meter-track{width:9px;height:var(--fader-h,210px);background:linear-gradient(180deg, #E1604C 0%, #E8C23D 12%, var(--accent) 32%, var(--accent-2) 100%);border:1px solid var(--line);border-radius:5px;position:relative;overflow:hidden;}
 .meter-fill{position:absolute;top:0;left:0;right:0;background:var(--panel-2);}
 
 /* Pult-Fader */
-.fader{--h:210px;--ch:46px;position:relative;width:54px;height:var(--h);cursor:ns-resize;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;}
+.fader{--h:var(--fader-h,210px);--ch:46px;position:relative;width:54px;height:var(--h);cursor:ns-resize;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;}
 .fader-scale{position:absolute;left:0;top:0;bottom:0;width:18px;pointer-events:none;}
 .fader-tick{position:absolute;right:0;width:100%;height:0;bottom:calc(var(--ch) / 2 + var(--t) * (var(--h) - var(--ch)));}
 .fader-tick span{position:absolute;right:6px;top:-5px;font:8.5px/10px var(--font-mono);color:#66708a;white-space:nowrap;}
@@ -454,3 +454,8 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .up-pos{width:18px;text-align:right;color:var(--muted);font-family:var(--font-mono);font-size:11px;}
 .up-btns{display:flex;gap:2px;} .up-btns button{background:none;border:1px solid var(--line);color:var(--text-dim);border-radius:5px;cursor:pointer;font-size:10px;padding:2px 6px;} .up-btns button:hover{color:var(--text);border-color:#4a5263;}
 .up-empty{color:var(--muted);font-size:12.5px;padding:18px 8px;text-align:center;line-height:1.5;}
+
+/* Wert-Blase über der Kappe (nur im Touch-Modus sichtbar, siehe touch.css) */
+.fader-bubble{display:none;position:absolute;left:50%;bottom:calc(var(--t) * (var(--h) - var(--ch)) + var(--ch) + 8px);transform:translateX(-50%);z-index:5;
+  padding:5px 10px;border-radius:8px;background:#000c;color:#fff;font:600 15px/1 var(--font-mono);white-space:nowrap;pointer-events:none;border:1px solid rgba(255,255,255,0.25);}
+.fader.fine .fader-bubble::after{content:" · fein";font-weight:500;color:#9CC8FF;}

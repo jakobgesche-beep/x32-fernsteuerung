@@ -222,6 +222,17 @@ Startwert abweichen) oder Verwerfen.
   Bus, Matrix, DCA) in eigener Reihenfolge. Stern am Kanalzug oder Fenster "Bearbeiten" (mit Suche und "nur benannte").
   Auswahl und zuletzt benutzte Ebene liegen im lokalen Speicher.
 
+## Touch-Modus (Version 2.8)
+
+Knopf **Touch** in der Kopfzeile (`renderer/touch.css`, Klasse `touch` am `<body>`; schaltet sich beim ersten echten Fingertipp
+oder auf Touch-Geräten selbst ein, gemerkt unter `x32-touch`): Bedienelemente mindestens 44 px, breite Fader mit großer Kappe, die
+Fader nutzen die Fensterhöhe (`--fader-h`, Übersicht klappt dafür automatisch ein), Bank-Tasten ‹ › zum Blättern, größere
+EQ-Griffe mit Tasten für Güte und Gain, kein Zoomen mit zwei Fingern, kein Kontextmenü bei langem Drücken.
+Fader (`renderer/fader.js`): mehrere Finger gleichzeitig (jeder Fader merkt sich seinen Finger), Wert-Blase über der Kappe,
+Feineinstellung (1/5) mit Shift, Finger ruhig halten oder seitlich wegrücken, Doppeltippen/Doppelklick = 0 dB.
+Hinweis: macOS liefert die Berührungen eines externen Touch-Monitors oft nur als Mausklicks (ein Finger, keine Multi-Touch-Ereignisse);
+dann bleibt alles einzeln bedienbar, und der Knopf "Touch" schaltet die großen Bedienelemente von Hand ein.
+
 ## App-Icon
 
 Quelle `build/icon.svg` (Beschriftungsschild "X32" mit rotem Farbbalken auf dunklem Grund, wie ein Kanalstreifen am Pult). `build/icon.png` (1024 px, mit transparenten Ecken) und

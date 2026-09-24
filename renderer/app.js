@@ -415,6 +415,7 @@ function setLayer(id){
   X.setSubs(X32V.subscriptionSpecs(id));
   updateHot();
   repaintMinis();
+  requestAnimationFrame(fitFaders);
 }
 function repaintMinis(){ Object.values(stripUI).forEach((ui) => Minis.schedule(ui)); }
 
@@ -453,6 +454,10 @@ function buildLayerTabs(){
   const tl = el('<button class="layer-tab" data-layer="tools">Werkzeuge</button>');
   tl.addEventListener('click', () => showView('tools'));
   layerTabs.appendChild(tl);
+  const bank = el('<span class="bank-btns"><button class="layer-tab bank-btn" aria-label="Kanalzüge nach links blättern">‹</button><button class="layer-tab bank-btn" aria-label="Kanalzüge nach rechts blättern">›</button></span>');
+  bank.children[0].addEventListener('click', () => bankScroll(-1));
+  bank.children[1].addEventListener('click', () => bankScroll(1));
+  layerTabs.appendChild(bank);
 }
 
 // Pegel auf die sichtbaren Streifen verteilen (mit Spitzenwert-Marke und Übersteuerungs-Lampe)
@@ -539,6 +544,54 @@ function applyDesign(d){
 }
 designBtn.addEventListener('click', () => applyDesign(document.body.classList.contains('plain') ? 'classic' : 'plain'));
 try { applyDesign(localStorage.getItem('x32-design') === 'classic' ? 'classic' : 'plain'); } catch(e){}
+
+// ---------- Touch-Modus (Touch-Monitor): große Bedienelemente, hohe Fader, Bank-Tasten ----------
+const touchBtn = document.getElementById('touch-btn');
+let autoCollapsedOverview = false;
+// Fader so hoch machen, wie der Bildschirm hergibt (mehr Weg = genauer)
+function fitFaders(){
+  const rootEl = document.documentElement;
+  rootEl.style.removeProperty('--fader-h');
+  if(!document.body.classList.contains('touch')) return;
+  const strip = app.querySelector('.strip') || document.querySelector('#dock .strip');
+  const fader = strip && strip.querySelector('.fader');
+  if(!strip || !fader) return;
+  const nonFader = strip.offsetHeight - fader.offsetHeight;
+  const docTop = strip.getBoundingClientRect().top + window.scrollY;
+  rootEl.style.setProperty('--fader-h', Math.max(210, Math.min(560, Math.floor(window.innerHeight - docTop - nonFader - 26))) + 'px');
+}
+function applyTouch(on, persist){
+  document.body.classList.toggle('touch', on);
+  touchBtn.textContent = on ? 'Touch: an' : 'Touch: aus';
+  touchBtn.classList.toggle('on', on);
+  if(persist){ try { localStorage.setItem('x32-touch', on ? 'on' : 'off'); } catch(e){} }
+  const ov = document.getElementById('overview');
+  if(on){
+    let chosen = null; try { chosen = localStorage.getItem('x32.overview.collapsed'); } catch(e){}
+    if(chosen === null && !ov.classList.contains('collapsed')){ ov.classList.add('collapsed'); autoCollapsedOverview = true; }   // mehr Platz für die Fader
+  } else if(autoCollapsedOverview){ ov.classList.remove('collapsed'); autoCollapsedOverview = false; }
+  fitFaders();                                       // sofort messen (erzwingt das Layout), danach noch einmal nach dem Zeichnen
+  requestAnimationFrame(() => { fitFaders(); Minis.redrawAll(); Measure.redraw(); });
+}
+touchBtn.addEventListener('click', () => applyTouch(!document.body.classList.contains('touch'), true));
+window.addEventListener('resize', () => fitFaders());
+// Bank-Tasten: die Kanalzug-Reihe um etwa eine Bildschirmbreite weiterblättern
+function bankScroll(dir){
+  const row = app.querySelector('.strip-row');
+  if(row) row.scrollBy({ left: dir * Math.max(240, row.clientWidth * 0.8), behavior: window.__instantScroll ? 'auto' : 'smooth' });
+}
+// Sobald wirklich mit dem Finger getippt wird (und der Touch-Modus nicht ausdrücklich aus ist): einschalten
+document.addEventListener('pointerdown', (e) => {
+  if(e.pointerType !== 'touch' || document.body.classList.contains('touch')) return;
+  let saved = null; try { saved = localStorage.getItem('x32-touch'); } catch(err){}
+  if(saved === 'off') return;
+  applyTouch(true, false);
+  toast('Touch-Modus eingeschaltet (oben mit „Touch“ abschaltbar).');
+}, true);
+document.addEventListener('contextmenu', (e) => { if(document.body.classList.contains('touch')) e.preventDefault(); });
+{ let saved = null; try { saved = localStorage.getItem('x32-touch'); } catch(e){}
+  const auto = (window.matchMedia && matchMedia('(pointer: coarse)').matches) || navigator.maxTouchPoints > 0;
+  applyTouch(saved === 'on' || (saved === null && auto), false); }
 
 // ================= Start =================
 const rewBtn = document.getElementById('rew-btn');

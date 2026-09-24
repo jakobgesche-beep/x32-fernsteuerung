@@ -168,7 +168,13 @@ function buildEqPage(){
   const page = el('<div class="eq-page"></div>');
   const canvas = el('<canvas class="eq-canvas"></canvas>');
   page.appendChild(canvas);
-  page.appendChild(el('<p class="hint">Ring ziehen: Frequenz &amp; Gain · Mausrad auf einem Ring: Güte (Q) · Klick wählt das Band</p>'));
+  page.appendChild(el('<p class="hint">Ring ziehen: Frequenz &amp; Gain · <span class="hint-mouse">Mausrad auf einem Ring: Güte (Q) · Klick wählt das Band</span><span class="hint-touch">Antippen wählt das Band · Güte mit den Tasten darunter</span></p>'));
+  const touchbar = el('<div class="eq-touchbar"><span>Gewähltes Band:</span></div>');
+  const qStep = (f) => { const i = proc.sel; if(i === null || i === undefined || !proc.eq[i]) return; const q = proc.eq[i].q !== undefined ? proc.eq[i].q : 1; setEqLocal(i, 'q', clamp(q * f, 0.3, 10)); };
+  touchbar.appendChild(makeXButton('Güte −', () => qStep(0.85)));
+  touchbar.appendChild(makeXButton('Güte +', () => qStep(1 / 0.85)));
+  touchbar.appendChild(makeXButton('Gain 0 dB', () => { const i = proc.sel; if(i !== null && i !== undefined && proc.eq[i] && !bandIsCut(proc.eq[i])) setEqLocal(i, 'g', 0); }));
+  page.appendChild(touchbar);
 
   const nBands = proc.strip.eqBands;
   const controls = el('<div class="eq-controls' + (nBands > 4 ? ' dense' : '') + '" style="grid-template-columns:150px repeat(' + nBands + ',minmax(0,1fr))"></div>');
@@ -245,7 +251,7 @@ function bindEqCanvas(canvas){
   const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   function nearest(x, y){
     const g = eqGeometry(canvas);
-    let best = null, bestDist = 24;
+    let best = null, bestDist = document.body.classList.contains('touch') ? 46 : 24;
     proc.eq.forEach((b, i) => {
       if(b.f === undefined || b.g === undefined) return;
       const d = Math.hypot(x - eqX(b.f, g), y - bandHandleY(b, g));
@@ -356,7 +362,8 @@ function drawEq(){
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x + 0.5, EQ_PAD.t - 6); ctx.lineTo(x + 0.5, H - EQ_PAD.b); ctx.stroke();
     ctx.globalAlpha = eqOn ? 1 : 0.4;
-    ctx.beginPath(); ctx.arc(x, y, sel ? 19 : 17, 0, Math.PI * 2);
+    const K = document.body.classList.contains('touch') ? 1.5 : 1;
+    ctx.beginPath(); ctx.arc(x, y, (sel ? 19 : 17) * K, 0, Math.PI * 2);
     ctx.strokeStyle = sel ? '#ffffff' : color;
     ctx.lineWidth = 2;
     ctx.stroke();

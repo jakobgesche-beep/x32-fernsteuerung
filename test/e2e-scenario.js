@@ -317,10 +317,10 @@ window.__mockInit = (mock) => {
 
     // "Neu in dieser Version"
     try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
-    maybeShowChangelog('2.7.0');
-    const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 4;
+    maybeShowChangelog('2.8.0');
+    const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 3;
     document.getElementById('changelog-overlay').querySelector('button').click();
-    maybeShowChangelog('2.7.0');
+    maybeShowChangelog('2.8.0');
     check('Neu-in-Version: erscheint einmal mit Liste, nach "Verstanden" nicht wieder', shown && !document.getElementById('changelog-overlay'));
     maybeShowChangelog('9.9.9');
     check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
@@ -464,6 +464,111 @@ window.__mockInit = (mock) => {
     check('Meine Seite: Fenster schließt', !document.getElementById('userpage-editor'));
     setLayer('ch'); await sleep(300);
 
+    // Touch-Modus
+    {
+    try { localStorage.removeItem('x32-touch'); localStorage.removeItem('x32.overview.collapsed'); } catch(e){}
+    window.__instantScroll = true;
+    setLayer('ch'); await sleep(300);
+    const tb = document.getElementById('touch-btn');
+    const tp = (type, target, x, y, id, extra) => target.dispatchEvent(new PointerEvent(type, Object.assign({ clientX: x, clientY: y, pointerId: id, pointerType: 'touch', bubbles: true, cancelable: true }, extra || {})));
+    const capCenter = (fd) => { const r = fd.capElement.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+    const travelOf = (fd) => fd.yForT(0) - fd.yForT(1);
+    check('Touch: Knopf in der Kopfzeile, standardmäßig aus', !document.body.classList.contains('touch') && /aus/.test(tb.textContent));
+    const normalCapW = stripUI['ch01'].fader.capElement.getBoundingClientRect().width;
+    tb.click(); await sleep(400);
+    const cs = (sel) => getComputedStyle(document.querySelector(sel));
+    check('Touch: Modus an, Zustand gemerkt, Übersicht automatisch eingeklappt (mehr Platz)', document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === 'on' && /an/.test(tb.textContent) && document.getElementById('overview').classList.contains('collapsed'));
+    const capW = stripUI['ch01'].fader.capElement.getBoundingClientRect().width;
+    check('Touch: große Ziele (Mute ≥ 48 px, Reiter ≥ 44 px, Fader-Kappe ≥ 56 px breit statt ' + Math.round(normalCapW) + ')', parseFloat(cs('.mute-btn').height) >= 48 && parseFloat(cs('.layer-tab').height) >= 44 && capW >= 56, 'Mute ' + cs('.mute-btn').height + ', Reiter ' + cs('.layer-tab').height + ', Kappe ' + Math.round(capW));
+    const fh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fader-h'));
+    check('Touch: Fader nutzen die Fensterhöhe (Höhe gesetzt, ≥ 210 px, Meter gleich hoch)', fh >= 210 && Math.abs(stripUI['ch01'].fader.offsetHeight - fh) < 1 && Math.abs(parseFloat(cs('.meter-track').height) - fh) < 1, fh + ' px, style=' + document.documentElement.getAttribute('style') + ', innerH=' + window.innerHeight);
+    check('Touch: Bank-Tasten zum Blättern sichtbar', getComputedStyle(document.querySelector('.bank-btns')).display !== 'none');
+    const row = app.querySelector('.strip-row'); row.scrollLeft = 0;
+    document.querySelectorAll('.bank-btn')[1].click(); await sleep(900);
+    check('Touch: Bank-Taste "›" blättert die Kanalzüge weiter, "‹" zurück', row.scrollLeft > 100, 'scrollLeft ' + Math.round(row.scrollLeft));
+    document.querySelectorAll('.bank-btn')[0].click(); await sleep(900);
+    check('Touch: Bank-Taste "‹" blättert zurück', row.scrollLeft < 5, 'scrollLeft ' + Math.round(row.scrollLeft));
+
+    // zwei Finger, zwei Fader gleichzeitig
+    const fa = stripUI['ch01'].fader, fb = stripUI['ch02'].fader;
+    fa.value = 0.5; fb.value = 0.5;
+    const ca = capCenter(fa), cb = capCenter(fb), ta = travelOf(fa), tbv = travelOf(fb);
+    tp('pointerdown', fa.capElement, ca.x, ca.y, 21); tp('pointerdown', fb.capElement, cb.x, cb.y, 22);
+    tp('pointermove', fa.capElement, ca.x, ca.y - 30, 21); tp('pointermove', fb.capElement, cb.x, cb.y + 40, 22);
+    const bubbleShown = getComputedStyle(fa.bubbleElement).display !== 'none' && getComputedStyle(fb.bubbleElement).display !== 'none';
+    const bubbleTxt = fa.bubbleElement.textContent;
+    tp('pointermove', fa.capElement, ca.x, ca.y - 50, 21);
+    check('Touch: zwei Finger bewegen zwei Fader gleichzeitig und unabhängig (ch01 hoch, ch02 runter)', Math.abs(parseFloat(fa.value) - (0.5 + 50 / ta)) < 0.01 && Math.abs(parseFloat(fb.value) - (0.5 - 40 / tbv)) < 0.01 && fa.isDragging() && fb.isDragging(), fa.value + ' / ' + fb.value);
+    check('Touch: Wert-Blase über der Kappe zeigt die dB während des Ziehens', bubbleShown && /^-?\d+\.\d$/.test(bubbleTxt) && fa.bubbleElement.textContent === stripUI['ch01'].dbLabel.textContent, bubbleTxt + ' / ' + stripUI['ch01'].dbLabel.textContent);
+    tp('pointerup', fa.capElement, ca.x, ca.y - 50, 21); tp('pointerup', fb.capElement, cb.x, cb.y + 40, 22); await sleep(200);
+    check('Touch: Loslassen sendet beide Werte ans Pult, Blase weg', Math.abs(__ctl.mock.store.get('/ch/01/mix/fader') - parseFloat(fa.value)) < 0.01 && Math.abs(__ctl.mock.store.get('/ch/02/mix/fader') - parseFloat(fb.value)) < 0.01 && getComputedStyle(fa.bubbleElement).display === 'none' && !fa.isDragging());
+    // ein zweiter Finger auf demselben Fader stört nicht
+    fa.value = 0.5; tp('pointerdown', fa.capElement, ca.x, ca.y, 31); tp('pointerdown', fa.capElement, ca.x + 5, ca.y + 200, 32); tp('pointermove', fa.capElement, ca.x, ca.y - 50, 31);
+    const pinky = parseFloat(fa.value); tp('pointermove', fa.capElement, ca.x + 5, ca.y + 300, 32); const pinky2 = parseFloat(fa.value);
+    tp('pointerup', fa.capElement, ca.x, ca.y - 50, 31);
+    check('Touch: zweiter Finger auf demselben Fader wird ignoriert', Math.abs(pinky - (0.5 + 50 / ta)) < 0.01 && pinky2 === pinky);
+
+    // Feineinstellung: Finger ruhig halten, oder seitlich wegrücken
+    fa.value = 0.4; const c1 = capCenter(fa);
+    tp('pointerdown', fa.capElement, c1.x, c1.y, 41); await sleep(520);
+    const fineOn = fa.classList.contains('fine');
+    tp('pointermove', fa.capElement, c1.x, c1.y - 50, 41);
+    const fineDelta = parseFloat(fa.value) - 0.4;
+    tp('pointerup', fa.capElement, c1.x, c1.y - 50, 41);
+    check('Touch: Finger ruhig halten = Feineinstellung (1/5 Empfindlichkeit), Kappe springt dabei nicht', fineOn && Math.abs(fineDelta - 50 / ta * 0.2) < 0.005, 'Änderung ' + fineDelta.toFixed(4) + ' erwartet ' + (50 / ta * 0.2).toFixed(4));
+    fa.value = 0.4; const c2 = capCenter(fa);
+    tp('pointerdown', fa.capElement, c2.x, c2.y, 42);
+    tp('pointermove', fa.capElement, c2.x + 160, c2.y, 42);
+    tp('pointermove', fa.capElement, c2.x + 160, c2.y - 50, 42);
+    const farDelta = parseFloat(fa.value) - 0.4, farFine = fa.classList.contains('fine');
+    tp('pointerup', fa.capElement, c2.x + 160, c2.y - 50, 42);
+    check('Touch: beim Ziehen seitlich wegrücken = Feineinstellung', farFine && Math.abs(farDelta - 50 / ta * 0.2) < 0.005, 'Änderung ' + farDelta.toFixed(4));
+    fa.value = 0.4; const c3 = capCenter(fa);
+    tp('pointerdown', fa.capElement, c3.x, c3.y, 43); tp('pointermove', fa.capElement, c3.x, c3.y - 50, 43); const normDelta = parseFloat(fa.value) - 0.4; tp('pointerup', fa.capElement, c3.x, c3.y - 50, 43);
+    check('Touch: normales Ziehen ist 5x so schnell wie fein', Math.abs(normDelta - 50 / ta) < 0.005 && normDelta / fineDelta > 4.5 && normDelta / fineDelta < 5.5, normDelta.toFixed(3) + ' / ' + fineDelta.toFixed(3));
+
+    // Doppeltippen = 0 dB
+    X.setWire('/ch/01/mix/fader', 'f', 0.4); await sleep(150);
+    const c4 = capCenter(fa);
+    tp('pointerdown', fa.capElement, c4.x, c4.y, 51); tp('pointerup', fa.capElement, c4.x, c4.y, 51);
+    await sleep(120);
+    tp('pointerdown', fa.capElement, c4.x + 3, c4.y + 2, 52); tp('pointerup', fa.capElement, c4.x + 3, c4.y + 2, 52);
+    await sleep(250);
+    check('Touch: Doppeltippen auf die Kappe = zurück auf 0 dB (auch am Pult)', Math.abs(parseFloat(fa.value) - 0.75) < 0.002 && Math.abs(__ctl.mock.store.get('/ch/01/mix/fader') - 0.75) < 0.002, fa.value);
+    // Einzeltippen auf die Kappe verstellt nichts
+    fa.value = 0.6; const c5 = capCenter(fa); tp('pointerdown', fa.capElement, c5.x, c5.y, 53); tp('pointerup', fa.capElement, c5.x, c5.y, 53);
+    check('Touch: Einzeltippen auf die Kappe verstellt den Fader nicht', Math.abs(parseFloat(fa.value) - 0.6) < 0.001);
+    const cm = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); fa.dispatchEvent(cm);
+    check('Touch: langes Drücken öffnet kein Kontextmenü', cm.defaultPrevented);
+
+    // EQ-Seite mit Touch-Leiste
+    openDetail(STRIP_BY_ID['ch02']); await sleep(400);
+    const tbar = document.querySelector('.eq-touchbar');
+    check('Touch: EQ-Seite zeigt Güte-/Gain-Tasten und den Touch-Hinweis', !!tbar && getComputedStyle(tbar).display !== 'none' && /Antippen/.test(document.querySelector('.eq-page .hint').textContent) && getComputedStyle(document.querySelector('.hint-mouse')).display === 'none');
+    proc.sel = 1;
+    const q0 = X.actual('/ch/02/eq/2/q');
+    Array.from(tbar.querySelectorAll('button')).find((b) => /Güte \+/.test(b.textContent)).click(); await sleep(150);
+    const q1 = X.actual('/ch/02/eq/2/q');
+    Array.from(tbar.querySelectorAll('button')).find((b) => /Güte −/.test(b.textContent)).click(); await sleep(150);
+    Array.from(tbar.querySelectorAll('button')).find((b) => /Gain 0/.test(b.textContent)).click(); await sleep(150);
+    check('Touch: EQ Güte + / − ändern die Güte des gewählten Bands, "Gain 0 dB" setzt es zurück', q1 > q0 * 1.15 && Math.abs(X.actual('/ch/02/eq/2/q') - q0) < q0 * 0.02 && Math.abs(X.actual('/ch/02/eq/2/g')) < 0.01, q0.toFixed(2) + ' -> ' + q1.toFixed(2));
+    closeDetail(); await sleep(100);
+
+    // Ausschalten und Selbst-Erkennung
+    tb.click(); await sleep(300);
+    check('Touch: Knopf schaltet wieder aus (normale Größen, Höhe zurück, Übersicht wieder offen)', !document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === 'off' && !document.documentElement.style.getPropertyValue('--fader-h') && !document.getElementById('overview').classList.contains('collapsed'));
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', pointerId: 60, bubbles: true }));
+    check('Touch: ausdrücklich ausgeschaltet bleibt aus, auch wenn getippt wird', !document.body.classList.contains('touch'));
+    try { localStorage.removeItem('x32-touch'); } catch(e){}
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', pointerId: 61, bubbles: true }));
+    check('Touch: Mausklick schaltet den Touch-Modus nicht ein', !document.body.classList.contains('touch'));
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', pointerId: 62, bubbles: true })); await sleep(300);
+    check('Touch: erster echter Fingertipp schaltet den Touch-Modus selbst ein (mit Hinweis)', document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === null);
+    tb.click(); await sleep(200); try { localStorage.removeItem('x32-touch'); } catch(e){}
+    document.getElementById('overview').classList.remove('collapsed');
+    setLayer('ch'); await sleep(200);
+    }
+
     // Design: Schlicht (Standard) und Klassisch umschaltbar, Wahl wird gemerkt
     const acc = () => getComputedStyle(document.body).getPropertyValue('--accent').trim().toUpperCase();
     check('Design: Standard ist "Schlicht" (ruhiges Blau, Systemschrift), Knopf zeigt es an', document.body.classList.contains('plain') && acc() === '#0A84FF' && /Schlicht/.test(document.getElementById('design-btn').textContent) && /apple-system/i.test(getComputedStyle(document.body).getPropertyValue('--font-body')), acc());
@@ -524,6 +629,7 @@ window.__mockInit = (mock) => {
   // ---- Ansichten für Screenshots ----
   if(view === 'offlinemode'){ document.getElementById('connect-btn').click(); await waitFor(() => X.status().state === 'idle', 3000); await enterOffline(); X.setWire('/ch/01/mix/fader', 'f', 0.62); X.setWire('/ch/03/mix/on', 'i', 0); await sleep(700); }
   if(view === 'user'){ ['ch02', 'ch01', 'bus03', 'ch06', 'st'].forEach((i) => { if(i !== 'st') UserPage.add(i); }); setLayer('user'); await sleep(1500); }
+  if(view === 'touch' || view === 'touch-eq'){ try { localStorage.removeItem('x32.overview.collapsed'); } catch(e){} document.getElementById('touch-btn').click(); await sleep(700); if(view === 'touch-eq'){ openDetail(STRIP_BY_ID['ch02']); await sleep(500); } }
   if(view === 'tools') showView('tools');
   if(view === 'scenes'){ try { localStorage.removeItem('x32.scenes'); } catch(e){} Scenes.saveScene('Soundcheck', true); X.setWire('/ch/01/mix/fader', 'f', 0.3); Scenes.saveScene('Band A – Bühne', false); Scenes.open(); }
   if(view === 'clip'){ const m1 = STRIP_BY_ID['ch01'].meter, f = new Float32Array(70); f[m1.idx[0]] = 1.0; __ctl.emitMeter(m1.stream, f); f[m1.idx[0]] = 0.35; __ctl.emitMeter(m1.stream, f); }

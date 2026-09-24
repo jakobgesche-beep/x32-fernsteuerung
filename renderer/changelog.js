@@ -1,5 +1,13 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.8.0': {
+    title: 'Neu in Version 2.8.0',
+    items: [
+      ['Touch-Modus', 'Für Touch-Monitore: Knopf „Touch“ oben. Große Tasten, breite Fader mit großer Kappe, die die ganze Bildschirmhöhe nutzen, und Pfeile zum Blättern durch die Kanäle. Schaltet sich beim ersten Fingertipp auch selbst ein.'],
+      ['Fader mit dem Finger', 'Mehrere Fader gleichzeitig mit mehreren Fingern. Die dB stehen in einer Blase über dem Finger. Fein einstellen: Finger kurz ruhig halten oder beim Ziehen seitlich wegrücken. Doppeltippen auf die Kappe = 0 dB.'],
+      ['EQ mit dem Finger', 'Größere Griffe, dazu Tasten „Güte −/+“ und „Gain 0 dB“ für das gewählte Band.'],
+    ],
+  },
   '2.7.0': {
     title: 'Neu in Version 2.7.0',
     items: [
