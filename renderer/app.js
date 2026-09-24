@@ -309,11 +309,11 @@ function paintStrip(ui){
 let currentView = 'console';
 function showView(view){
   currentView = view;
-  document.getElementById('console').hidden = view !== 'console';
-  document.getElementById('measure').hidden = view !== 'measure';
-  layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', view === 'measure' ? b.dataset.layer === 'measure' : b.dataset.layer === currentLayer));
+  ['console', 'measure', 'tools'].forEach((id) => { document.getElementById(id).hidden = id !== view; });
+  layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === (view === 'console' ? currentLayer : view)));
   if(view === 'measure'){ if(typeof closeDetail === 'function') closeDetail(); Measure.init(document.getElementById('measure')); Measure.show(); }
   else Measure.hide();
+  if(view === 'tools'){ if(typeof closeDetail === 'function') closeDetail(); Tools.init(document.getElementById('tools')); }
 }
 
 function setLayer(id){
@@ -365,6 +365,9 @@ function buildLayerTabs(){
   const sc = el('<button class="layer-tab right-group" data-layer="scenes">Szenen</button>');
   sc.addEventListener('click', () => Scenes.open());
   layerTabs.appendChild(sc);
+  const tl = el('<button class="layer-tab" data-layer="tools">Werkzeuge</button>');
+  tl.addEventListener('click', () => showView('tools'));
+  layerTabs.appendChild(tl);
   const m = el('<button class="layer-tab measure-tab" data-layer="measure">Messung</button>');
   m.addEventListener('click', () => showView('measure'));
   layerTabs.appendChild(m);

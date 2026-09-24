@@ -325,6 +325,20 @@ window.__mockInit = (mock) => {
     maybeShowChangelog('9.9.9');
     check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
 
+    // Werkzeuge
+    const toolsTab = document.querySelector('.layer-tab[data-layer="tools"]');
+    toolsTab.click(); await sleep(200);
+    const tv = document.getElementById('tools');
+    check('Werkzeuge: Reiter zeigt fünf Rechner, Pult-Fläche ausgeblendet', !tv.hidden && document.getElementById('console').hidden && tv.querySelectorAll('.t-card').length === 5 && toolsTab.classList.contains('on'));
+    const results = () => Array.from(tv.querySelectorAll('.t-result b')).map((b) => b.textContent);
+    check('Werkzeuge: 20 m bei 20 °C = 58,3 ms Delay, 58,3 ms = 20 m', /^58,3 ms/.test(results()[0]) && /^20 m|^20,0 m/.test(results()[1]), results().slice(0, 2).join(' | '));
+    const first = tv.querySelector('.t-card input'); first.value = '34.32'; first.dispatchEvent(new Event('input', { bubbles: true }));
+    check('Werkzeuge: Eingabe ändert das Ergebnis sofort (34,32 m = 100 ms)', /^100 ms/.test(results()[0]), results()[0]);
+    check('Werkzeuge: Tempo-Tabelle mit 12 Zeilen, 120 BPM: Viertel 500 ms', tv.querySelectorAll('.t-tr').length === 12 && /500 ms/.test(tv.querySelector('.t-table').textContent));
+    check('Werkzeuge: Pegel 100 dB in 1 m -> 74 dB in 20 m; 90+90 = 93 dB; 440 Hz = A4', /^74 dB/.test(results()[2]) && /^93 dB/.test(results()[3]) && /A4/.test(tv.textContent), results().join(' | '));
+    document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
+    check('Werkzeuge: zurück zum Pult blendet sie aus', tv.hidden && !document.getElementById('console').hidden);
+
     // Messung: eigener Reiter neben den Ebenen, funktioniert ohne Pult-Bedienung
     const mTab = document.querySelector('.layer-tab.measure-tab');
     check('Reiter "Messung" neben den Pult-Ebenen', !!mTab && mTab.textContent === 'Messung');
@@ -340,6 +354,9 @@ window.__mockInit = (mock) => {
   }
 
   // ---- Ansichten für Screenshots ----
+  if(view === 'tools') showView('tools');
+  if(view === 'scenes'){ try { localStorage.removeItem('x32.scenes'); } catch(e){} Scenes.saveScene('Soundcheck', true); X.setWire('/ch/01/mix/fader', 'f', 0.3); Scenes.saveScene('Band A – Bühne', false); Scenes.open(); }
+  if(view === 'clip'){ const m1 = STRIP_BY_ID['ch01'].meter, f = new Float32Array(70); f[m1.idx[0]] = 1.0; __ctl.emitMeter(m1.stream, f); f[m1.idx[0]] = 0.35; __ctl.emitMeter(m1.stream, f); }
   if(view === 'diag'){ document.getElementById('status-badge').click(); await sleep(400); }
   if(view === 'nettest'){ document.getElementById('status-badge').click(); await sleep(200); document.getElementById('net-test-btn').click(); await sleep(4500); }
   if(['aux', 'bus', 'mtx', 'dca'].includes(view)) setLayer(view);
