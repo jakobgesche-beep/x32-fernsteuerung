@@ -1,0 +1,850 @@
+// ================= Processing-Ansicht: EQ + Kompressor im Stil der X32-Oberfläche =================
+// Benötigt aus app.js: el(), esc(), fmt(), toast(), channels, chColor(), levelToPct()
+
+const EQ_TYPES = ['LCut', 'LShv', 'PEQ', 'VEQ', 'HShv', 'HCut'];
+const BAND_NAMES = ['Low', 'LoMid', 'HiMid', 'High'];
+const BAND_COLORS = ['#3EC9C9', '#4C9BE0', '#E8548C', '#F0A83C'];
+const DYN_RATIOS = [1.1, 1.3, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10, 20, 100];
+const FILTER_TYPES = ['LC6', 'LC12', 'HC6', 'HC12', '1.0', '2.0', '3.0', '5.0', '10.0'];
+const HP_SLOPES = [12, 18, 24];
+const KEY_SOURCES = (() => {
+  const list = ['Self'];
+  for(let i = 1; i <= 32; i++) list.push('In ' + String(i).padStart(2, '0'));
+  for(let i = 1; i <= 6; i++) list.push('Aux ' + i);
+  list.push('USB L', 'USB R');
+  for(let i = 1; i <= 4; i++) list.push('Fx ' + i + 'L', 'Fx ' + i + 'R');
+  for(let i = 1; i <= 16; i++) list.push('Bus ' + String(i).padStart(2, '0'));
+  return list;
+})();
+
+const SAMPLE_RATE = 48000;
+const EQ_MIN_DB = -15, EQ_MAX_DB = 15, EQ_MIN_F = 20, EQ_MAX_F = 20000;
+const EQ_PAD = { l: 40, r: 14, t: 36, b: 24 };
+const ORANGE = '#E0952F';
+const TURQ = '#3DE6DC';
+const KNEE_DB_PER_STEP = 2;
+
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+// ---------- reine Rechenfunktionen (ohne DOM) ----------
+function biquadCoeffs(typeName, f, gainDb, Q){
+  const A = Math.pow(10, gainDb / 40);
+  const w0 = 2 * Math.PI * f / SAMPLE_RATE;
+  const cosw0 = Math.cos(w0), sinw0 = Math.sin(w0);
+  const alpha = sinw0 / (2 * Q);
+  let b0, b1, b2, a0, a1, a2;
+  if(typeName === 'PEQ' || typeName === 'VEQ'){
+    b0 = 1 + alpha * A; b1 = -2 * cosw0; b2 = 1 - alpha * A;
+    a0 = 1 + alpha / A; a1 = -2 * cosw0; a2 = 1 - alpha / A;
+  } else if(typeName === 'LShv'){
+    const sq = Math.sqrt(A);
+    b0 = A * ((A + 1) - (A - 1) * cosw0 + 2 * sq * alpha);
+    b1 = 2 * A * ((A - 1) - (A + 1) * cosw0);
+    b2 = A * ((A + 1) - (A - 1) * cosw0 - 2 * sq * alpha);
+    a0 = (A + 1) + (A - 1) * cosw0 + 2 * sq * alpha;
+    a1 = -2 * ((A - 1) + (A + 1) * cosw0);
+    a2 = (A + 1) + (A - 1) * cosw0 - 2 * sq * alpha;
+  } else if(typeName === 'HShv'){
+    const sq = Math.sqrt(A);
+    b0 = A * ((A + 1) + (A - 1) * cosw0 + 2 * sq * alpha);
+    b1 = -2 * A * ((A - 1) + (A + 1) * cosw0);
+    b2 = A * ((A + 1) + (A - 1) * cosw0 - 2 * sq * alpha);
+    a0 = (A + 1) - (A - 1) * cosw0 + 2 * sq * alpha;
+    a1 = 2 * ((A - 1) - (A + 1) * cosw0);
+    a2 = (A + 1) - (A - 1) * cosw0 - 2 * sq * alpha;
+  } else if(typeName === 'LCut'){
+    b0 = (1 + cosw0) / 2; b1 = -(1 + cosw0); b2 = (1 + cosw0) / 2;
+    a0 = 1 + alpha; a1 = -2 * cosw0; a2 = 1 - alpha;
+  } else if(typeName === 'HCut'){
+    b0 = (1 - cosw0) / 2; b1 = 1 - cosw0; b2 = (1 - cosw0) / 2;
+    a0 = 1 + alpha; a1 = -2 * cosw0; a2 = 1 - alpha;
+  } else {
+    b0 = 1; b1 = 0; b2 = 0; a0 = 1; a1 = 0; a2 = 0;
+  }
+  return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
+}
+function magnitudeDb(c, f){
+  const w = 2 * Math.PI * f / SAMPLE_RATE;
+  const cos1 = Math.cos(w), sin1 = -Math.sin(w), cos2 = Math.cos(2 * w), sin2 = -Math.sin(2 * w);
+  const nRe = c.b0 + c.b1 * cos1 + c.b2 * cos2, nIm = c.b1 * sin1 + c.b2 * sin2;
+  const dRe = 1 + c.a1 * cos1 + c.a2 * cos2, dIm = c.a1 * sin1 + c.a2 * sin2;
+  return 20 * Math.log10(Math.sqrt(nRe * nRe + nIm * nIm) / Math.sqrt(dRe * dRe + dIm * dIm));
+}
+function hpfDb(fc, slopeDbPerOct, f){
+  const n = slopeDbPerOct / 6;
+  return -10 * Math.log10(1 + Math.pow(fc / f, 2 * n));
+}
+function eqResponseDb(f, eq, misc){
+  let total = 0;
+  if(misc.hpOn && misc.hpf) total += hpfDb(misc.hpf, HP_SLOPES[misc.hpSlope] || 18, f);
+  if(misc.eqOn !== 0){
+    eq.forEach((b) => {
+      if(b.type === undefined || b.f === undefined || b.g === undefined || b.q === undefined) return;
+      const cut = b.type === 0 || b.type === 5;
+      total += magnitudeDb(biquadCoeffs(EQ_TYPES[b.type], b.f, b.g, cut ? Math.SQRT1_2 : b.q), f);
+    });
+  }
+  return total;
+}
+function transferOut(x, d){
+  const T = d.thr !== undefined ? d.thr : -20;
+  const R = DYN_RATIOS[d.ratio !== undefined ? d.ratio : 5] || 3;
+  const G = d.mgain || 0;
+  const W = Math.round(d.knee || 0) * KNEE_DB_PER_STEP;
+  let y;
+  if(d.mode === 1) y = x >= T ? x : T + (x - T) * R;
+  else if(W > 0 && x > T - W / 2 && x < T + W / 2) y = x + (1 / R - 1) * Math.pow(x - T + W / 2, 2) / (2 * W);
+  else y = x < T ? x : T + (x - T) / R;
+  return y + G;
+}
+function sidechainDb(f, d){
+  const fc = d['filter/f'] || 1000, t = d['filter/type'] || 0, r = f / fc;
+  let p;
+  if(t === 0) p = r * r / (1 + r * r);
+  else if(t === 1) p = 1 / (1 + Math.pow(1 / r, 4));
+  else if(t === 2) p = 1 / (1 + r * r);
+  else if(t === 3) p = 1 / (1 + Math.pow(r, 4));
+  else { const Q = [1, 2, 3, 5, 10][t - 4] || 1; p = 1 / (1 + Q * Q * Math.pow(r - 1 / r, 2)); }
+  return 10 * Math.log10(Math.max(p, 1e-9));
+}
+function grFromFactor(v){ return v > 0 && v < 1 ? -20 * Math.log10(v) : 0; }
+
+// ---------- Canvas-Helfer ----------
+function canvasCtx(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if(canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)){
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, W: w, H: h };
+}
+function fmtFreq(f){ return f >= 1000 ? (f / 1000).toFixed(2) + ' kHz' : (Math.round(f * 10) / 10) + ' Hz'; }
+
+// ---------- Zustand ----------
+let proc = null;
+
+// Während eines Ziehens ignorieren wir das Echo vom Pult (sonst springt der Regler
+// zurück) und holen die Werte danach einmal frisch ab.
+function procBusy(on){
+  if(!proc) return;
+  proc.busy = Math.max(0, proc.busy + (on ? 1 : -1));
+  if(!on && proc.busy === 0) window.x32API.selectChannel(proc.ch);
+}
+
+function setEqLocal(band, field, value){
+  proc.eq[band][field] = value;
+  refreshEq();
+  window.x32API.setEq(proc.ch, band, field, value);
+}
+function setMiscLocal(key, value){
+  proc.misc[key] = value;
+  refreshEq();
+  window.x32API.setMisc(proc.ch, key, value);
+}
+function setDynLocal(field, value, live){
+  proc.dyn[field] = value;
+  refreshDyn();
+  if(live){
+    const now = performance.now();
+    if(now - (proc.lastSend[field] || 0) < 25) return;
+    proc.lastSend[field] = now;
+  }
+  window.x32API.setDyn(proc.ch, field, value);
+}
+
+// ---------- kleine UI-Bausteine ----------
+function makeXButton(label, onClick, extraClass){
+  const b = el('<button class="x-btn ' + (extraClass || '') + '">' + esc(label) + '</button>');
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function makeRadioGroup(items, onChange, cls){
+  const wrap = el('<div class="radio-group ' + (cls || '') + '"></div>');
+  const nodes = items.map((it) => {
+    const lab = el('<label class="radio"><span class="dot"></span><span class="rtxt">' + esc(it.label) + '</span></label>');
+    lab.addEventListener('click', (e) => { e.preventDefault(); onChange(it.value); });
+    wrap.appendChild(lab);
+    return { lab, value: it.value };
+  });
+  return { el: wrap, set(v){ nodes.forEach((n) => n.lab.classList.toggle('on', n.value === v)); } };
+}
+
+function makeVBar(opts){
+  const min = opts.min, max = opts.max, log = !!opts.log, step = opts.step;
+  const wrap = el('<div class="vbar"></div>');
+  const valEl = el('<div class="vbar-val">–</div>');
+  const track = el('<div class="vbar-track"></div>');
+  const fill = el('<div class="vbar-fill"></div>');
+  const handle = el('<div class="vbar-handle"></div>');
+  track.appendChild(opts.handle ? handle : fill);
+  if(opts.ticks) wrap.classList.add('with-scale');
+  if(opts.ticks){
+    opts.ticks.forEach((tv) => {
+      const t = log ? Math.log(tv / min) / Math.log(max / min) : (tv - min) / (max - min);
+      const tick = el('<div class="vbar-tick" style="bottom:' + (t * 100) + '%"><span>' + esc(tv) + '</span></div>');
+      track.appendChild(tick);
+    });
+  }
+  wrap.appendChild(valEl);
+  wrap.appendChild(track);
+  wrap.appendChild(el('<div class="vbar-label">' + esc(opts.label) + '</div>'));
+
+  let value = null, dragging = false, lastSend = 0;
+  const toT = (v) => clamp(log ? Math.log(v / min) / Math.log(max / min) : (v - min) / (max - min), 0, 1);
+  const fromT = (t) => {
+    t = clamp(t, 0, 1);
+    let v = log ? min * Math.pow(max / min, t) : min + t * (max - min);
+    if(step && !log) v = Math.round(v / step) * step;
+    return clamp(v, min, max);
+  };
+  function paint(){
+    if(value === null) return;
+    const pct = toT(value) * 100;
+    fill.style.height = pct + '%';
+    handle.style.bottom = 'calc(' + pct + '% - 6px)';
+    valEl.textContent = opts.format(value);
+  }
+  function emit(final){
+    const now = performance.now();
+    if(!final && now - lastSend < 25) return;
+    lastSend = now;
+    opts.onChange(value);
+  }
+  function move(e){
+    const r = track.getBoundingClientRect();
+    value = fromT(1 - (e.clientY - r.top) / r.height);
+    paint();
+    emit(false);
+  }
+  track.addEventListener('pointerdown', (e) => { dragging = true; procBusy(true); track.setPointerCapture(e.pointerId); move(e); });
+  track.addEventListener('pointermove', (e) => { if(dragging) move(e); });
+  const endDrag = () => { if(dragging){ dragging = false; emit(true); procBusy(false); } };
+  track.addEventListener('pointerup', endDrag);
+  track.addEventListener('pointercancel', endDrag);
+  track.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if(value === null) return;
+    const dir = e.deltaY < 0 ? 1 : -1;
+    value = (step && !log) ? clamp(value + dir * step, min, max) : fromT(toT(value) + dir * 0.02);
+    paint();
+    emit(true);
+  }, { passive: false });
+
+  return { el: wrap, set(v){ if(dragging) return; value = v; paint(); } };
+}
+
+function makeGrMeter(){
+  const wrap = el('<div class="vbar gr"></div>');
+  wrap.appendChild(el('<div class="vbar-val">GR</div>'));
+  const track = el('<div class="vbar-track gr-track"></div>');
+  [3, 6, 9, 12, 15, 18].forEach((db) => {
+    track.appendChild(el('<div class="vbar-tick top" style="top:' + (db / 18 * 100) + '%"><span>' + db + '</span></div>'));
+  });
+  const fill = el('<div class="gr-fill"></div>');
+  track.appendChild(fill);
+  wrap.appendChild(track);
+  wrap.appendChild(el('<div class="vbar-label">Reduktion</div>'));
+  return { el: wrap, set(db){ fill.style.height = clamp(db / 18, 0, 1) * 100 + '%'; } };
+}
+
+// ---------- EQ-Seite ----------
+function buildEqPage(){
+  const page = el('<div class="eq-page"></div>');
+  const canvas = el('<canvas class="eq-canvas"></canvas>');
+  page.appendChild(canvas);
+  page.appendChild(el('<p class="hint">Ring ziehen: Frequenz &amp; Gain · Mausrad auf einem Ring: Güte (Q) · Klick wählt das Band</p>'));
+
+  const controls = el('<div class="eq-controls"></div>');
+  const left = el('<div class="eq-left"></div>');
+  const eqBtn = makeXButton('EQ', () => setMiscLocal('eqOn', proc.misc.eqOn === 0 ? 1 : 0), 'wide');
+  const resetBtn = makeXButton('Reset', () => {
+    proc.eq.forEach((b, i) => { if(b.g !== undefined && b.g !== 0) setEqLocal(i, 'g', 0); });
+  }, 'wide gray');
+  left.appendChild(eqBtn);
+  left.appendChild(resetBtn);
+
+  const lowcut = el('<div class="lowcut"></div>');
+  const hpBtn = makeXButton('', () => setMiscLocal('hpOn', proc.misc.hpOn ? 0 : 1), 'hp-btn');
+  hpBtn.innerHTML = '<svg viewBox="0 0 24 18" width="26" height="20"><path d="M2 16 L9 16 C11 16 12 4 15 4 L22 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+  const hpInput = el('<input type="number" min="20" max="400" step="1">');
+  hpInput.addEventListener('change', () => setMiscLocal('hpf', clamp(parseFloat(hpInput.value) || 20, 20, 400)));
+  const hpSlope = el('<select></select>');
+  HP_SLOPES.forEach((s, i) => hpSlope.appendChild(el('<option value="' + i + '">' + s + ' dB/Okt</option>')));
+  hpSlope.addEventListener('change', () => setMiscLocal('hpSlope', parseInt(hpSlope.value, 10)));
+  lowcut.appendChild(hpBtn);
+  lowcut.appendChild(el('<div class="lc-row"></div>'));
+  lowcut.lastChild.appendChild(hpInput);
+  lowcut.lastChild.appendChild(el('<span>Hz</span>'));
+  lowcut.appendChild(hpSlope);
+  lowcut.appendChild(el('<div class="lc-label">Low Cut</div>'));
+  left.appendChild(lowcut);
+  controls.appendChild(left);
+
+  const cols = [];
+  for(let b = 0; b < 4; b++){
+    const col = el('<div class="eq-col" style="--bc:' + BAND_COLORS[b] + '"></div>');
+    const head = el('<button class="eq-band-btn">' + BAND_NAMES[b] + '</button>');
+    head.addEventListener('click', () => { proc.sel = b; refreshEq(); });
+    const typeSel = el('<select></select>');
+    EQ_TYPES.forEach((t, i) => typeSel.appendChild(el('<option value="' + i + '">' + t + '</option>')));
+    typeSel.addEventListener('change', () => setEqLocal(b, 'type', parseInt(typeSel.value, 10)));
+    const mk = (label, attrs, unit, field, parse) => {
+      const row = el('<label class="eq-row"><span>' + label + '</span></label>');
+      const input = el('<input type="number" ' + attrs + '>');
+      input.addEventListener('focus', () => { proc.sel = b; });
+      input.addEventListener('change', () => { const v = parse(input.value); if(!isNaN(v)) setEqLocal(b, field, v); });
+      row.appendChild(input);
+      row.appendChild(el('<em>' + unit + '</em>'));
+      return { row, input };
+    };
+    const gain = mk('Gain', 'min="-15" max="15" step="0.25"', 'dB', 'g', (v) => clamp(parseFloat(v), -15, 15));
+    const freq = mk('Freq', 'min="20" max="20000" step="1"', 'Hz', 'f', (v) => clamp(parseFloat(v), 20, 20000));
+    const q = mk('Güte', 'min="0.3" max="10" step="0.1"', '', 'q', (v) => clamp(parseFloat(v), 0.3, 10));
+    const modeRow = el('<label class="eq-row"><span>Mode</span></label>');
+    modeRow.appendChild(typeSel);
+    [head, modeRow, gain.row, freq.row, q.row].forEach((n) => col.appendChild(n));
+    controls.appendChild(col);
+    cols.push({ col, head, typeSel, gain: gain.input, freq: freq.input, q: q.input });
+  }
+  page.appendChild(controls);
+
+  bindEqCanvas(canvas);
+  return { page, canvas, eqBtn, hpBtn, hpInput, hpSlope, cols };
+}
+
+function eqGeometry(canvas){
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  return { W, H, pw: W - EQ_PAD.l - EQ_PAD.r, ph: H - EQ_PAD.t - EQ_PAD.b };
+}
+function eqX(f, g){ return EQ_PAD.l + (Math.log10(f) - Math.log10(EQ_MIN_F)) / (Math.log10(EQ_MAX_F) - Math.log10(EQ_MIN_F)) * g.pw; }
+function eqFreqAt(x, g){ const t = clamp((x - EQ_PAD.l) / g.pw, 0, 1); return Math.pow(10, Math.log10(EQ_MIN_F) + t * (Math.log10(EQ_MAX_F) - Math.log10(EQ_MIN_F))); }
+function eqY(db, g){ return EQ_PAD.t + (EQ_MAX_DB - db) / (EQ_MAX_DB - EQ_MIN_DB) * g.ph; }
+function eqDbAt(y, g){ const t = clamp((y - EQ_PAD.t) / g.ph, 0, 1); return EQ_MAX_DB - t * (EQ_MAX_DB - EQ_MIN_DB); }
+function bandIsCut(b){ return b.type === 0 || b.type === 5; }
+function bandHandleY(b, g){ return eqY(bandIsCut(b) ? 0 : clamp(b.g, EQ_MIN_DB, EQ_MAX_DB), g); }
+
+function bindEqCanvas(canvas){
+  let dragBand = null, lastSend = 0;
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  function nearest(x, y){
+    const g = eqGeometry(canvas);
+    let best = null, bestDist = 24;
+    proc.eq.forEach((b, i) => {
+      if(b.f === undefined || b.g === undefined) return;
+      const d = Math.hypot(x - eqX(b.f, g), y - bandHandleY(b, g));
+      if(d < bestDist){ bestDist = d; best = i; }
+    });
+    return best;
+  }
+  canvas.addEventListener('pointerdown', (e) => {
+    const p = pos(e);
+    dragBand = nearest(p.x, p.y);
+    if(dragBand !== null){ proc.sel = dragBand; procBusy(true); canvas.setPointerCapture(e.pointerId); refreshEq(); }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    const p = pos(e);
+    if(dragBand === null){ canvas.style.cursor = nearest(p.x, p.y) !== null ? 'grab' : 'default'; return; }
+    canvas.style.cursor = 'grabbing';
+    const g = eqGeometry(canvas);
+    const b = proc.eq[dragBand];
+    b.f = clamp(Math.round(eqFreqAt(p.x, g)), EQ_MIN_F, EQ_MAX_F);
+    if(!bandIsCut(b)) b.g = Math.round(eqDbAt(p.y, g) * 4) / 4;
+    refreshEq();
+    const now = performance.now();
+    if(now - lastSend < 25) return;
+    lastSend = now;
+    window.x32API.setEq(proc.ch, dragBand, 'f', b.f);
+    if(!bandIsCut(b)) window.x32API.setEq(proc.ch, dragBand, 'g', b.g);
+  });
+  const finish = () => {
+    if(dragBand === null) return;
+    const b = proc.eq[dragBand];
+    window.x32API.setEq(proc.ch, dragBand, 'f', b.f);
+    if(!bandIsCut(b)) window.x32API.setEq(proc.ch, dragBand, 'g', b.g);
+    dragBand = null;
+    canvas.style.cursor = 'default';
+    procBusy(false);
+  };
+  canvas.addEventListener('pointerup', finish);
+  canvas.addEventListener('pointercancel', finish);
+  canvas.addEventListener('wheel', (e) => {
+    const p = pos(e);
+    const i = nearest(p.x, p.y);
+    if(i === null) return;
+    e.preventDefault();
+    const cur = proc.eq[i].q !== undefined ? proc.eq[i].q : 1;
+    setEqLocal(i, 'q', clamp(cur * (e.deltaY < 0 ? 1.08 : 0.92), 0.3, 10));
+  }, { passive: false });
+}
+
+function drawEq(){
+  const cv = proc.els.eq.canvas;
+  const { ctx, W, H } = canvasCtx(cv);
+  if(!W) return;
+  const g = eqGeometry(cv);
+  const eqOn = proc.misc.eqOn !== 0;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0d0d0d';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for(let db = EQ_MIN_DB; db <= EQ_MAX_DB; db += 5){
+    const y = Math.round(eqY(db, g)) + 0.5;
+    ctx.strokeStyle = db === 0 ? '#8a8a8a' : '#262626';
+    ctx.lineWidth = db === 0 ? 1.5 : 1;
+    ctx.beginPath(); ctx.moveTo(EQ_PAD.l, y); ctx.lineTo(W - EQ_PAD.r, y); ctx.stroke();
+    ctx.fillStyle = '#6b6b6b';
+    ctx.fillText((db > 0 ? '+' : '') + db, EQ_PAD.l - 7, y);
+  }
+  ctx.lineWidth = 1;
+  [10, 100, 1000, 10000].forEach((dec) => {
+    for(let m = 1; m <= 9; m++){
+      const f = m * dec;
+      if(f < EQ_MIN_F || f > EQ_MAX_F) continue;
+      const x = Math.round(eqX(f, g)) + 0.5;
+      ctx.strokeStyle = m === 1 ? '#343434' : '#1e1e1e';
+      ctx.beginPath(); ctx.moveTo(x, EQ_PAD.t); ctx.lineTo(x, H - EQ_PAD.b); ctx.stroke();
+    }
+  });
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = '#6b6b6b';
+  [[20, '20'], [50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k'], [20000, '20k']]
+    .forEach(([f, label]) => ctx.fillText(label, eqX(f, g), H - EQ_PAD.b + 6));
+
+  const pts = [];
+  const steps = Math.max(120, Math.floor(g.pw / 3));
+  for(let i = 0; i <= steps; i++){
+    const f = Math.pow(10, Math.log10(EQ_MIN_F) + (i / steps) * (Math.log10(EQ_MAX_F) - Math.log10(EQ_MIN_F)));
+    pts.push({ x: eqX(f, g), y: eqY(eqResponseDb(f, proc.eq, proc.misc), g) });
+  }
+  const zeroY = eqY(0, g);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(EQ_PAD.l, EQ_PAD.t, g.pw, g.ph);
+  ctx.clip();
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.lineTo(pts[pts.length - 1].x, zeroY);
+  ctx.lineTo(pts[0].x, zeroY);
+  ctx.closePath();
+  ctx.fillStyle = eqOn ? 'rgba(224,149,47,0.28)' : 'rgba(150,150,150,0.14)';
+  ctx.fill();
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.strokeStyle = eqOn ? ORANGE : '#8a8a8a';
+  ctx.lineWidth = 2.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
+
+  proc.eq.forEach((b, i) => {
+    if(b.f === undefined || b.g === undefined) return;
+    const x = eqX(b.f, g), y = bandHandleY(b, g);
+    const color = BAND_COLORS[i], sel = proc.sel === i;
+    ctx.globalAlpha = eqOn ? 1 : 0.4;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = eqOn ? 0.5 : 0.2;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + 0.5, EQ_PAD.t - 6); ctx.lineTo(x + 0.5, H - EQ_PAD.b); ctx.stroke();
+    ctx.globalAlpha = eqOn ? 1 : 0.4;
+    ctx.beginPath(); ctx.arc(x, y, sel ? 19 : 17, 0, Math.PI * 2);
+    ctx.strokeStyle = sel ? '#ffffff' : color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.strokeStyle = '#e8e8e8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, 17, 11, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.fillStyle = '#0d0d0d';
+    ctx.font = '600 12px "IBM Plex Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(i + 1), x, 17.5);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function refreshEq(){
+  if(!proc) return;
+  const e = proc.els.eq, m = proc.misc;
+  const active = (n) => document.activeElement === n;
+  e.eqBtn.classList.toggle('on', m.eqOn !== 0);
+  e.hpBtn.classList.toggle('on', !!m.hpOn);
+  if(m.hpf !== undefined && !active(e.hpInput)) e.hpInput.value = Math.round(m.hpf);
+  if(m.hpSlope !== undefined) e.hpSlope.value = m.hpSlope;
+  proc.eq.forEach((b, i) => {
+    const c = e.cols[i];
+    c.col.classList.toggle('sel', proc.sel === i);
+    if(b.type !== undefined) c.typeSel.value = b.type;
+    if(b.g !== undefined && !active(c.gain)) c.gain.value = fmt(b.g, 2);
+    if(b.f !== undefined && !active(c.freq)) c.freq.value = Math.round(b.f);
+    if(b.q !== undefined && !active(c.q)) c.q.value = fmt(b.q, 2);
+    const cut = b.type === 0 || b.type === 5;
+    c.gain.disabled = cut;
+  });
+  drawEq();
+}
+
+// ---------- Kompressor-Seite ----------
+const TF_MIN = -60, TF_MAX = 0;
+const TF_PAD = 8;
+
+function tfX(db, W){ return TF_PAD + (db - TF_MIN) / (TF_MAX - TF_MIN) * (W - 2 * TF_PAD); }
+function tfY(db, H){ return H - TF_PAD - (db - TF_MIN) / (TF_MAX - TF_MIN) * (H - 2 * TF_PAD); }
+function tfDbAtX(x, W){ return clamp(TF_MIN + (x - TF_PAD) / (W - 2 * TF_PAD) * (TF_MAX - TF_MIN), TF_MIN, TF_MAX); }
+function tfDbAtY(y, H){ return TF_MIN + (H - TF_PAD - y) / (H - 2 * TF_PAD) * (TF_MAX - TF_MIN); }
+
+function drawTransfer(){
+  const cv = proc.els.dyn.tfCanvas;
+  const { ctx, W, H } = canvasCtx(cv);
+  if(!W) return;
+  const d = proc.dyn;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#050505';
+  ctx.fillRect(0, 0, W, H);
+  ctx.lineWidth = 1;
+  for(let db = -50; db <= -10; db += 10){
+    ctx.strokeStyle = '#1b1b1b';
+    const x = Math.round(tfX(db, W)) + 0.5, y = Math.round(tfY(db, H)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, TF_PAD); ctx.lineTo(x, H - TF_PAD); ctx.moveTo(TF_PAD, y); ctx.lineTo(W - TF_PAD, y); ctx.stroke();
+  }
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.beginPath(); ctx.moveTo(tfX(TF_MIN, W), tfY(TF_MIN, H)); ctx.lineTo(tfX(TF_MAX, W), tfY(TF_MAX, H)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const active = d.on !== 0;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(TF_PAD, TF_PAD, W - 2 * TF_PAD, H - 2 * TF_PAD); ctx.clip();
+  ctx.beginPath();
+  for(let x = TF_MIN; x <= TF_MAX; x += 0.5){
+    const px = tfX(x, W), py = tfY(transferOut(x, d), H);
+    if(x === TF_MIN) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.strokeStyle = active ? '#5B6CFF' : '#4a4f7a';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.restore();
+
+  const T = d.thr !== undefined ? d.thr : -20;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(tfX(T, W), clamp(tfY(transferOut(T, d), H), TF_PAD, H - TF_PAD), 5, 0, Math.PI * 2); ctx.fill();
+  if(d.mode !== 1){
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(tfX(0, W), clamp(tfY(transferOut(0, d), H), TF_PAD, H - TF_PAD), 5, 0, Math.PI * 2); ctx.stroke();
+  }
+  if(proc.inDb > TF_MIN){
+    const x = clamp(proc.inDb, TF_MIN, TF_MAX);
+    ctx.fillStyle = TURQ;
+    ctx.beginPath(); ctx.arc(tfX(x, W), clamp(tfY(transferOut(x, d), H), TF_PAD, H - TF_PAD), 4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function bindTransferCanvas(cv){
+  let dragging = null;
+  const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  function hit(p){
+    const W = cv.clientWidth, H = cv.clientHeight, d = proc.dyn;
+    const T = d.thr !== undefined ? d.thr : -20;
+    const a = Math.hypot(p.x - tfX(T, W), p.y - clamp(tfY(transferOut(T, d), H), TF_PAD, H - TF_PAD));
+    const b = Math.hypot(p.x - tfX(0, W), p.y - clamp(tfY(transferOut(0, d), H), TF_PAD, H - TF_PAD));
+    if(a < 16 && a <= b) return 'thr';
+    if(b < 16 && d.mode !== 1) return 'ratio';
+    return null;
+  }
+  cv.addEventListener('pointerdown', (e) => { dragging = hit(pos(e)); if(dragging){ procBusy(true); cv.setPointerCapture(e.pointerId); } });
+  cv.addEventListener('pointermove', (e) => {
+    const p = pos(e);
+    if(!dragging){ cv.style.cursor = hit(p) ? 'grab' : 'default'; return; }
+    const W = cv.clientWidth, H = cv.clientHeight, d = proc.dyn;
+    if(dragging === 'thr'){
+      setDynLocal('thr', clamp(Math.round(tfDbAtX(p.x, W) * 2) / 2, -60, 0), true);
+    } else {
+      const T = d.thr !== undefined ? d.thr : -20;
+      const outAt0 = tfDbAtY(p.y, H) - (d.mgain || 0);
+      let ratio = outAt0 <= T + 0.2 ? 100 : (0 - T) / (outAt0 - T);
+      ratio = clamp(ratio, 1.1, 100);
+      let best = 0, bestDiff = Infinity;
+      DYN_RATIOS.forEach((r, i) => { const diff = Math.abs(Math.log(r) - Math.log(ratio)); if(diff < bestDiff){ bestDiff = diff; best = i; } });
+      if(best !== d.ratio) setDynLocal('ratio', best, true);
+    }
+  });
+  const finish = () => {
+    if(dragging){ window.x32API.setDyn(proc.ch, dragging, proc.dyn[dragging]); procBusy(false); }
+    dragging = null;
+    cv.style.cursor = 'default';
+  };
+  cv.addEventListener('pointerup', finish);
+  cv.addEventListener('pointercancel', finish);
+}
+
+function drawEnvelope(){
+  const cv = proc.els.dyn.envCanvas;
+  const { ctx, W, H } = canvasCtx(cv);
+  if(!W) return;
+  const d = proc.dyn;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#050505';
+  ctx.fillRect(0, 0, W, H);
+  const att = d.attack !== undefined ? d.attack : 10;
+  const hold = d.hold !== undefined ? d.hold : 10;
+  const rel = d.release !== undefined ? d.release : 150;
+  const aw = 14 + 50 * (att / 120);
+  const hw = 12 + 50 * (Math.log10(Math.max(hold, 0.02) / 0.02) / 5);
+  const rw = 16 + 70 * (Math.log10(Math.max(rel, 5) / 5) / 2.9);
+  const total = aw + hw + rw;
+  const x0 = (W - total) / 2, top = 12, bottom = H - 8;
+  const x1 = x0 + aw, x2 = x1 + hw, x3 = x2 + rw;
+  ctx.beginPath();
+  ctx.moveTo(x0, bottom); ctx.lineTo(x1, top); ctx.lineTo(x2, top); ctx.lineTo(x3, bottom); ctx.closePath();
+  ctx.fillStyle = 'rgba(61,230,220,0.35)';
+  ctx.fill();
+  ctx.strokeStyle = TURQ;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
+}
+
+function drawFilter(){
+  const cv = proc.els.dyn.scCanvas;
+  const { ctx, W, H } = canvasCtx(cv);
+  if(!W) return;
+  const d = proc.dyn;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#050505';
+  ctx.fillRect(0, 0, W, H);
+  const on = !!d['filter/on'];
+  const pts = [];
+  for(let i = 0; i <= 100; i++){
+    const f = Math.pow(10, Math.log10(20) + (i / 100) * 3);
+    pts.push({ x: i / 100 * W, y: 8 + clamp(-sidechainDb(f, d) / 36, 0, 1) * (H - 16) });
+  }
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = on ? 'rgba(200,200,200,0.4)' : 'rgba(120,120,120,0.2)';
+  ctx.fill();
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.strokeStyle = on ? '#e0e0e0' : '#6a6a6a';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function buildDynPage(){
+  const page = el('<div class="dyn-page"></div>');
+  const top = el('<div class="dyn-top"></div>');
+  const active = makeXButton('Active', () => setDynLocal('on', proc.dyn.on === 0 ? 1 : 0), 'active-btn');
+  top.appendChild(active);
+  page.appendChild(top);
+  const grid = el('<div class="dyn-grid3"></div>');
+
+  // --- Gain ---
+  const secGain = el('<section class="dyn-sec"><h4>Gain</h4></section>');
+  const gainTop = el('<div class="dyn-top-row"></div>');
+  const tfCanvas = el('<canvas class="dyn-canvas tf"></canvas>');
+  const kneeCol = el('<div class="knee-col"></div>');
+  const knee = makeRadioGroup([0, 1, 2, 3, 4, 5].map((k) => ({ label: String(k), value: k })), (k) => setDynLocal('knee', k), 'col');
+  kneeCol.appendChild(knee.el);
+  kneeCol.appendChild(el('<div class="mini-label">Knee</div>'));
+  gainTop.appendChild(tfCanvas);
+  gainTop.appendChild(kneeCol);
+  secGain.appendChild(gainTop);
+  const mode = makeRadioGroup([{ label: 'Comp', value: 0 }, { label: 'Exp', value: 1 }], (v) => setDynLocal('mode', v), 'row center');
+  secGain.appendChild(mode.el);
+  const bars1 = el('<div class="vbars"></div>');
+  const thr = makeVBar({ label: 'Threshold', min: -60, max: 0, step: 0.5, handle: true, ticks: [-10, -20, -30, -40, -50, -60], format: (v) => fmt(v, 1) + ' dB', onChange: (v) => setDynLocal('thr', v) });
+  const gr = makeGrMeter();
+  const ratio = makeVBar({ label: 'Ratio', min: 0, max: 11, step: 1, format: (v) => fmt(DYN_RATIOS[v], 1), onChange: (v) => setDynLocal('ratio', v) });
+  const mix = makeVBar({ label: 'Mix', min: 0, max: 100, step: 5, format: (v) => Math.round(v) + ' %', onChange: (v) => setDynLocal('mix', v) });
+  const mgain = makeVBar({ label: 'Gain', min: 0, max: 24, step: 0.5, format: (v) => fmt(v, 2) + ' dB', onChange: (v) => setDynLocal('mgain', v) });
+  [thr.el, gr.el, ratio.el, mix.el, mgain.el].forEach((n) => bars1.appendChild(n));
+  secGain.appendChild(bars1);
+  grid.appendChild(secGain);
+
+  // --- Gain Envelope ---
+  const secEnv = el('<section class="dyn-sec"><h4>Gain Envelope</h4></section>');
+  const envTop = el('<div class="dyn-top-row"></div>');
+  const envRadios = el('<div class="env-radios"></div>');
+  const env = makeRadioGroup([{ label: 'Lin', value: 0 }, { label: 'Log', value: 1 }], (v) => setDynLocal('env', v), 'col');
+  const det = makeRadioGroup([{ label: 'Peak', value: 0 }, { label: 'RMS', value: 1 }], (v) => setDynLocal('det', v), 'col');
+  envRadios.appendChild(env.el);
+  envRadios.appendChild(det.el);
+  const envCanvas = el('<canvas class="dyn-canvas env"></canvas>');
+  envTop.appendChild(envRadios);
+  envTop.appendChild(envCanvas);
+  secEnv.appendChild(envTop);
+  const autoBtn = makeXButton('Auto Time', () => setDynLocal('auto', proc.dyn.auto ? 0 : 1), 'center-btn');
+  secEnv.appendChild(autoBtn);
+  const bars2 = el('<div class="vbars"></div>');
+  const attack = makeVBar({ label: 'Attack', min: 0, max: 120, step: 1, format: (v) => Math.round(v) + ' ms', onChange: (v) => setDynLocal('attack', v) });
+  const hold = makeVBar({ label: 'Hold', min: 0.02, max: 2000, log: true, format: (v) => (v < 10 ? fmt(v, 2) : fmt(v, 1)) + ' ms', onChange: (v) => setDynLocal('hold', v) });
+  const release = makeVBar({ label: 'Release', min: 5, max: 4000, log: true, format: (v) => Math.round(v) + ' ms', onChange: (v) => setDynLocal('release', v) });
+  [attack.el, hold.el, release.el].forEach((n) => bars2.appendChild(n));
+  secEnv.appendChild(bars2);
+  grid.appendChild(secEnv);
+
+  // --- Side Chain Filter ---
+  const secSc = el('<section class="dyn-sec"><h4>Side Chain Filter</h4></section>');
+  const scCanvas = el('<canvas class="dyn-canvas sc"></canvas>');
+  secSc.appendChild(scCanvas);
+  const keyRow = el('<div class="key-row"><span>Key Source</span></div>');
+  const keySel = el('<select></select>');
+  KEY_SOURCES.forEach((n, i) => keySel.appendChild(el('<option value="' + i + '">' + esc(n) + '</option>')));
+  keySel.addEventListener('change', () => setDynLocal('keysrc', parseInt(keySel.value, 10)));
+  keyRow.appendChild(keySel);
+  secSc.appendChild(keyRow);
+  const scBtn = makeXButton('Filter', () => setDynLocal('filter/on', proc.dyn['filter/on'] ? 0 : 1), 'center-btn');
+  secSc.appendChild(scBtn);
+  const bars3 = el('<div class="vbars"></div>');
+  const scType = makeVBar({ label: 'Type', min: 0, max: 8, step: 1, format: (v) => FILTER_TYPES[v], onChange: (v) => setDynLocal('filter/type', v) });
+  const scFreq = makeVBar({ label: 'Frequency', min: 20, max: 20000, log: true, format: (v) => fmtFreq(v), onChange: (v) => setDynLocal('filter/f', v) });
+  [scType.el, scFreq.el].forEach((n) => bars3.appendChild(n));
+  secSc.appendChild(bars3);
+  grid.appendChild(secSc);
+
+  page.appendChild(grid);
+  bindTransferCanvas(tfCanvas);
+  return { page, active, tfCanvas, envCanvas, scCanvas, knee, mode, thr, gr, ratio, mix, mgain, env, det, autoBtn, attack, hold, release, keySel, scBtn, scType, scFreq };
+}
+
+function refreshDyn(){
+  if(!proc) return;
+  const d = proc.dyn, e = proc.els.dyn;
+  e.active.classList.toggle('on', d.on !== 0);
+  if(d.thr !== undefined) e.thr.set(d.thr);
+  if(d.ratio !== undefined) e.ratio.set(d.ratio);
+  if(d.mix !== undefined) e.mix.set(d.mix);
+  if(d.mgain !== undefined) e.mgain.set(d.mgain);
+  if(d.attack !== undefined) e.attack.set(d.attack);
+  if(d.hold !== undefined) e.hold.set(d.hold);
+  if(d.release !== undefined) e.release.set(d.release);
+  if(d['filter/type'] !== undefined) e.scType.set(d['filter/type']);
+  if(d['filter/f'] !== undefined) e.scFreq.set(d['filter/f']);
+  if(d.knee !== undefined) e.knee.set(Math.round(d.knee));
+  if(d.mode !== undefined) e.mode.set(d.mode);
+  if(d.env !== undefined) e.env.set(d.env);
+  if(d.det !== undefined) e.det.set(d.det);
+  e.autoBtn.classList.toggle('on', !!d.auto);
+  e.scBtn.classList.toggle('on', !!d['filter/on']);
+  if(d.keysrc !== undefined) e.keySel.value = d.keysrc;
+  drawTransfer();
+  drawEnvelope();
+  drawFilter();
+}
+
+// ---------- Gerüst: Overlay, Tabs, Meter ----------
+function redrawAll(){
+  if(!proc) return;
+  if(proc.tab === 'eq') drawEq(); else { drawTransfer(); drawEnvelope(); drawFilter(); }
+}
+
+function setTab(tab){
+  proc.tab = tab;
+  proc.els.eq.page.hidden = tab !== 'eq';
+  proc.els.dyn.page.hidden = tab !== 'dyn';
+  proc.els.tabEq.classList.toggle('on', tab === 'eq');
+  proc.els.tabDyn.classList.toggle('on', tab === 'dyn');
+  requestAnimationFrame(redrawAll);
+}
+
+let procFrame = null;
+function processingMeters(payload){
+  if(!proc) return;
+  const v = payload.levels[proc.ch - 1];
+  proc.inDb = v > 0.0001 ? 20 * Math.log10(v) : -90;
+  proc.els.inFill.style.height = (100 - levelToPct(v)).toFixed(0) + '%';
+  proc.gr = grFromFactor(payload.dynGr[proc.ch - 1]);
+  if(proc.tab === 'dyn' && !procFrame){
+    procFrame = requestAnimationFrame(() => {
+      procFrame = null;
+      if(!proc) return;
+      proc.els.dyn.gr.set(proc.gr);
+      drawTransfer();
+    });
+  }
+}
+
+function openDetail(ch){
+  closeDetail();
+  proc = { ch, tab: 'eq', eq: [{}, {}, {}, {}], misc: {}, dyn: {}, sel: 0, els: {}, inDb: -90, gr: 0, downOnOverlay: false, lastSend: {}, busy: 0 };
+  const overlay = el('<div class="overlay"></div>');
+  const card = el('<div class="proc-card"></div>');
+
+  const head = el('<div class="proc-head"></div>');
+  const c = chColor(channels[ch].color);
+  const chip = el('<div class="proc-chip" style="background:' + c.bg + ';color:' + c.fg + ';border-color:' + c.border + '"><b>' + esc(channels[ch].name) + '</b><span>Ch ' + String(ch).padStart(2, '0') + '</span></div>');
+  const tabs = el('<div class="proc-tabs"></div>');
+  const tabEq = el('<button class="proc-tab">EQ</button>');
+  const tabDyn = el('<button class="proc-tab">Kompressor</button>');
+  tabEq.addEventListener('click', () => setTab('eq'));
+  tabDyn.addEventListener('click', () => setTab('dyn'));
+  tabs.appendChild(tabEq); tabs.appendChild(tabDyn);
+  const closeBtn = el('<button class="close-btn">&times;</button>');
+  closeBtn.addEventListener('click', closeDetail);
+  head.appendChild(chip); head.appendChild(tabs); head.appendChild(closeBtn);
+  card.appendChild(head);
+
+  const body = el('<div class="proc-body"></div>');
+  const side = el('<div class="proc-side"></div>');
+  const inTrack = el('<div class="pm-track"></div>');
+  const inFill = el('<div class="pm-fill"></div>');
+  inTrack.appendChild(inFill);
+  side.appendChild(inTrack);
+  side.appendChild(el('<div class="mini-label">In</div>'));
+  const main = el('<div class="proc-main"></div>');
+  const eqPage = buildEqPage();
+  const dynPage = buildDynPage();
+  main.appendChild(eqPage.page);
+  main.appendChild(dynPage.page);
+  body.appendChild(side);
+  body.appendChild(main);
+  card.appendChild(body);
+  overlay.appendChild(card);
+
+  proc.overlay = overlay;
+  proc.els = { eq: eqPage, dyn: dynPage, inFill, tabEq, tabDyn };
+  eqPage.page.hidden = false;
+  dynPage.page.hidden = true;
+
+  overlay.addEventListener('mousedown', (e) => { proc.downOnOverlay = e.target === overlay; });
+  overlay.addEventListener('click', (e) => { if(e.target === overlay && proc.downOnOverlay) closeDetail(); });
+  proc.onResize = () => redrawAll();
+  proc.onKey = (e) => { if(e.key === 'Escape') closeDetail(); };
+  window.addEventListener('resize', proc.onResize);
+  window.addEventListener('keydown', proc.onKey);
+
+  document.body.appendChild(overlay);
+  setTab('eq');
+  refreshEq();
+  refreshDyn();
+  window.x32API.selectChannel(ch);
+}
+
+function closeDetail(){
+  if(!proc) return;
+  window.removeEventListener('resize', proc.onResize);
+  window.removeEventListener('keydown', proc.onKey);
+  proc.overlay.remove();
+  proc = null;
+}
+
+window.x32API.onChannelDetail((data) => {
+  if(!proc || data.ch !== proc.ch || proc.busy > 0) return;
+  data.eq.forEach((b, i) => Object.assign(proc.eq[i], b));
+  Object.assign(proc.misc, data.misc);
+  Object.assign(proc.dyn, data.dyn);
+  refreshEq();
+  refreshDyn();
+});

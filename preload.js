@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("x32API", {
   selectChannel: (ch) => ipcRenderer.invoke("x32-select-channel", ch),
   setEq: (ch, band, field, value) => ipcRenderer.invoke("x32-set-eq", ch, band, field, value),
   setDyn: (ch, field, value) => ipcRenderer.invoke("x32-set-dyn", ch, field, value),
+  setMisc: (ch, key, value) => ipcRenderer.invoke("x32-set-misc", ch, key, value),
   onChannel: (cb) => ipcRenderer.on("x32-channel", (event, data) => cb(data)),
   onChannelDetail: (cb) => ipcRenderer.on("x32-channel-detail", (event, data) => cb(data)),
   onMeters: (cb) => ipcRenderer.on("x32-meters", (event, levels) => cb(levels)),

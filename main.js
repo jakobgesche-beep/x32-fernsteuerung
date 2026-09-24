@@ -18,7 +18,7 @@ let metersTimer = null;
 
 const channelState = {};
 for (let i = 1; i <= 32; i++) {
-  channelState[i] = { name: "CH " + String(i).padStart(2, "0"), fader: 0, muted: false, eq: [{}, {}, {}, {}], dyn: {} };
+  channelState[i] = { name: "CH " + String(i).padStart(2, "0"), fader: 0, muted: false, color: 0, eq: [{}, {}, {}, {}], dyn: {}, misc: {} };
 }
 
 function log(msg) {
@@ -44,8 +44,24 @@ const FIELD_SPECS = {
     release: { kind: "logf", min: 5, max: 4000 },
     knee: { kind: "linf", min: 0, max: 5 },
     mix: { kind: "linf", min: 0, max: 100 },
+    mode: { kind: "enum" },
+    det: { kind: "enum" },
+    env: { kind: "enum" },
+    auto: { kind: "enum" },
+    keysrc: { kind: "enum" },
+    "filter/on": { kind: "enum" },
+    "filter/type": { kind: "enum" },
+    "filter/f": { kind: "logf", min: 20, max: 20000 },
+  },
+  misc: {
+    eqOn: { path: "eq/on", kind: "enum" },
+    hpOn: { path: "preamp/hpon", kind: "enum" },
+    hpSlope: { path: "preamp/hpslope", kind: "enum" },
+    hpf: { path: "preamp/hpf", kind: "logf", min: 20, max: 400 },
   },
 };
+const MISC_BY_PATH = {};
+Object.keys(FIELD_SPECS.misc).forEach((key) => { MISC_BY_PATH[FIELD_SPECS.misc[key].path] = key; });
 function normToActual(spec, norm) {
   if (spec.kind === "linf") return proto.linfToActual(norm, spec.min, spec.max);
   if (spec.kind === "logf") return proto.logfToActual(norm, spec.min, spec.max);
@@ -66,6 +82,7 @@ function send(address, args = []) {
 function requestChannelBasics(ch) {
   const base = chAddr(ch);
   send(base + "/config/name");
+  send(base + "/config/color");
   send(base + "/mix/fader");
   send(base + "/mix/on");
 }
@@ -78,16 +95,17 @@ function requestChannelDetail(ch) {
     send(base + "/eq/" + b + "/g");
     send(base + "/eq/" + b + "/q");
   }
-  ["on", "thr", "ratio", "mgain", "attack", "hold", "release", "knee", "mix"].forEach((f) => send(base + "/dyn/" + f));
+  Object.keys(FIELD_SPECS.dyn).forEach((f) => send(base + "/dyn/" + f));
+  Object.keys(FIELD_SPECS.misc).forEach((k) => send(base + "/" + FIELD_SPECS.misc[k].path));
 }
 
 function pushChannel(ch) {
   const s = channelState[ch];
-  if (mainWindow) mainWindow.webContents.send("x32-channel", { ch, name: s.name, fader: s.fader, faderDb: proto.faderToDb(s.fader), muted: s.muted });
+  if (mainWindow) mainWindow.webContents.send("x32-channel", { ch, name: s.name, fader: s.fader, faderDb: proto.faderToDb(s.fader), muted: s.muted, color: s.color });
 }
 function pushChannelDetail(ch) {
   const s = channelState[ch];
-  if (mainWindow) mainWindow.webContents.send("x32-channel-detail", { ch, eq: s.eq, dyn: s.dyn });
+  if (mainWindow) mainWindow.webContents.send("x32-channel-detail", { ch, eq: s.eq, dyn: s.dyn, misc: s.misc });
 }
 
 function handleMessage(msg) {
@@ -103,6 +121,13 @@ function handleMessage(msg) {
     if (sub === "config/name") { s.name = args[0].value || s.name; pushChannel(ch); }
     else if (sub === "mix/fader") { s.fader = args[0].value; pushChannel(ch); }
     else if (sub === "mix/on") { s.muted = args[0].value === 0; pushChannel(ch); }
+    else if (sub === "config/color") { s.color = args[0].value; pushChannel(ch); }
+    else if (MISC_BY_PATH[sub]) {
+      const key = MISC_BY_PATH[sub];
+      const spec = FIELD_SPECS.misc[key];
+      s.misc[key] = spec.kind === "enum" ? args[0].value : normToActual(spec, args[0].value);
+      pushChannelDetail(ch);
+    }
     else {
       const eqMatch = sub.match(/^eq\/(\d)\/(type|f|g|q)$/);
       if (eqMatch) {
@@ -128,7 +153,7 @@ function handleMessage(msg) {
     const blobArg = args.find((a) => a.type === "b");
     if (blobArg) {
       const values = proto.parseMeterBlob(blobArg.value);
-      if (mainWindow) mainWindow.webContents.send("x32-meters", Array.from(values.slice(0, 32)));
+      if (mainWindow) mainWindow.webContents.send("x32-meters", { levels: Array.from(values.slice(0, 32)), dynGr: Array.from(values.slice(64, 96)) });
     }
   }
 }
@@ -217,9 +242,16 @@ ipcMain.handle("x32-set-eq", async (event, ch, band, field, value) => {
   send(chAddr(ch) + "/eq/" + (band + 1) + "/" + field, [{ type: "f", value: actualToNorm(spec, value) }]);
 });
 ipcMain.handle("x32-set-dyn", async (event, ch, field, value) => {
-  if (field === "on" || field === "ratio") { send(chAddr(ch) + "/dyn/" + field, [{ type: "i", value }]); return; }
   const spec = FIELD_SPECS.dyn[field];
+  if (!spec) return;
+  if (spec.kind === "enum") { send(chAddr(ch) + "/dyn/" + field, [{ type: "i", value }]); return; }
   send(chAddr(ch) + "/dyn/" + field, [{ type: "f", value: actualToNorm(spec, value) }]);
+});
+ipcMain.handle("x32-set-misc", async (event, ch, key, value) => {
+  const spec = FIELD_SPECS.misc[key];
+  if (!spec) return;
+  if (spec.kind === "enum") { send(chAddr(ch) + "/" + spec.path, [{ type: "i", value }]); return; }
+  send(chAddr(ch) + "/" + spec.path, [{ type: "f", value: actualToNorm(spec, value) }]);
 });
 
 function createWindow() {

@@ -27,16 +27,19 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
 
 ## Funktionen
 
-- 32 Kanalzüge: Name (vom Pult), Fader (mit dB-Anzeige), Mute, Live-Pegel
-- Klick auf einen Kanal öffnet EQ (4 parametrische Bänder: Typ, Frequenz,
-  Gain, Q) und Kompressor/Dynamics (Ein/Aus, Threshold, Ratio, Makeup-Gain,
-  Attack, Hold, Release, Knee, Mix)
-- Änderungen, die direkt am Pult gemacht werden (Fader, Mute), erscheinen
-  automatisch auch in der App (`/xremote`-Abo)
-- Grafische EQ-Kurve pro Kanal (wie an einem Allen&Heath Avantis o.ä.):
-  zeigt die kombinierte Filterkurve aller 4 Bänder live an; Punkte direkt
-  auf der Kurve ziehen ändert Frequenz &amp; Gain, Mausrad über einem Punkt
-  ändert die Bandbreite (Q)
+- 32 Kanalzüge: Name und Farbe (vom Pult), Fader mit dB-Anzeige, Mute, Live-Pegel (dB-Skala)
+- Klick auf einen Kanal öffnet die Processing-Ansicht, nachgebaut nach den
+  X32-Seiten (und Elementen der Allen&Heath-Avantis-Oberfläche):
+  - **EQ**: große Kurve mit 4 farbigen Ring-Markern (Ziehen = Frequenz &
+    Gain, Mausrad = Güte/Q), orange Gesamtkurve inkl. Low Cut, Band-Spalten
+    mit Mode/Gain/Freq/Güte, EQ-Ein/Aus, Reset (alle Gains auf 0), Low Cut
+    (Ein/Aus, 20–400 Hz, 12/18/24 dB/Okt)
+  - **Kompressor**: Übertragungskurve (Threshold- und Ratio-Punkt ziehbar,
+    Knee 0–5, Comp/Exp, Live-Punkt für den aktuellen Eingangspegel),
+    senkrechte Balken für Threshold/Ratio/Mix/Gain mit Live-Gain-Reduction-
+    Anzeige, Gain Envelope (Attack/Hold/Release, Lin/Log, Peak/RMS, Auto
+    Time) und Side-Chain-Filter (Key Source, Filtertyp, Frequenz)
+- Änderungen am Pult selbst (Fader, Mute, EQ, Kompressor) erscheinen live in der App
 - "Pult suchen": durchsucht automatisch das aktuelle WLAN/Netzwerk nach
   X32/M32-Konsolen (OSC `/xinfo`-Anfrage an alle Adressen im Subnetz) und
   zeigt sie zur Auswahl an — keine IP-Adresse mehr nötig, sofern der Mac
@@ -77,7 +80,9 @@ Start einmalig warnen; Rechtsklick → "Öffnen" → nochmal "Öffnen" bestätig
 
 Das OSC-Protokoll (Fader-Kurve, Meter-Blob-Format, EQ/Dynamics-Adressen) ist
 nach der offiziellen Dokumentation umgesetzt, aber noch nicht an einem
-echten X32 getestet. Erster Test: verbinden, einen Fader in der App bewegen
+echten X32 getestet. Besonders zu prüfen: die Live-Gain-Reduction (als
+Verstärkungsfaktor 1.0 = keine Reduktion interpretiert) und die Knee-Breite
+in der Kurvendarstellung (Annäherung, 2 dB pro Stufe). Erster Test: verbinden, einen Fader in der App bewegen
 und schauen, ob sich der Fader-Wert am Pult (per Pult-Anzeige oder Mixing-
 Station-App zum Vergleich) auch ändert.
 
