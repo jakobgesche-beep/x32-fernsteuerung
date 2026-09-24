@@ -178,7 +178,7 @@ function buildStrip(strip){
     row.appendChild(track);
     ui.fills.push(fill);
   }
-  const fader = el('<input type="range" class="strip-fader" min="0" max="1" step="0.0005" value="0">');
+  const fader = makeFader();
   row.appendChild(fader);
   wrap.appendChild(row);
 
@@ -194,7 +194,6 @@ function buildStrip(strip){
     dbLabel.textContent = v <= 0 ? '-oo' : fmt(X32V.faderToDb(v), 1);
     X.setWire(faderPath, 'f', v);
   });
-  fader.addEventListener('pointerdown', () => { ui.dragging = true; });
   fader.addEventListener('dblclick', () => X.setWire(faderPath, 'f', 0.75));
   muteBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -221,18 +220,15 @@ function paintStrip(ui){
   if(iconId !== ui.iconId){ ui.iconId = iconId; ui.icon.innerHTML = iconId ? X32Icons.svg(iconId, 26) : ''; }
   const f = X.get(ui.faderPath);
   if(f !== undefined){
-    if(!ui.dragging) ui.fader.value = f;
+    if(!ui.fader.isDragging()) ui.fader.value = f;
     ui.dbLabel.textContent = f <= 0 ? '-oo' : fmt(X32V.faderToDb(f), 1);
   }
   const on = X.get(ui.onPath);
   const muted = on === 0;
+  ui.wrap.style.setProperty('--cap-line', CH_HUES[(color || 0) % 8] || '#3DC7E8');
   ui.wrap.classList.toggle('muted', muted);
   ui.muteBtn.classList.toggle('active', muted);
 }
-
-// Loslassen beendet das Ziehen bei allen Schiebern (auch wenn der Zeiger außerhalb losgelassen wird)
-window.addEventListener('pointerup', () => { for(const sid in stripUI) stripUI[sid].dragging = false; });
-window.addEventListener('pointercancel', () => { for(const sid in stripUI) stripUI[sid].dragging = false; });
 
 function setLayer(id){
   currentLayer = id;

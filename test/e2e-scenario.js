@@ -66,6 +66,44 @@ window.__mockInit = (mock) => {
     const r6 = __ctl.mock.log.sets.get('/ch/06/mix/fader');
     check('Ziehen: Endwert am Pult stimmt', Math.abs(r6.last - 1) < 1e-6, 'Pult ' + r6.last + ', Pakete ' + (r6.count - before) + ' für 101 Bewegungen in ' + Math.round(performance.now() - tw) + ' ms');
 
+    // ---- Pult-Fader: Bedienung ----
+    const fc = stripUI['ch10'].fader, fcap = fc.capElement;
+    const fp = (type, target, y, extra) => target.dispatchEvent(new PointerEvent(type, Object.assign({ clientX: 0, clientY: y, pointerId: 1, bubbles: true }, extra || {})));
+    const trav = fc.querySelector('.fader-track').getBoundingClientRect().height;
+    const mockFader = () => __ctl.mock.store.get('/ch/10/mix/fader');
+    fc.value = 0.5;
+    check('Fader: Kappe mittig bei 0.5', Math.abs(fcap.getBoundingClientRect().top + fcap.offsetHeight / 2 - fc.yForT(0.5)) < 1.5);
+    const zeroTick = fc.querySelector('.fader-tick.zero').getBoundingClientRect();
+    fc.value = 0.75;
+    const capRect = fcap.getBoundingClientRect();
+    check('Fader: 0-dB-Marke liegt auf Höhe der Kappenmitte', Math.abs(zeroTick.top - (capRect.top + capRect.height / 2)) < 1.5, 'Abstand ' + Math.abs(zeroTick.top - (capRect.top + capRect.height / 2)).toFixed(2) + ' px');
+    fp('pointerdown', fc, fc.yForT(0.4)); fp('pointerup', fc, fc.yForT(0.4));
+    const cr = fcap.getBoundingClientRect();
+    check('Fader: Kappe liegt nach dem Klick genau unter dem Mauszeiger', Math.abs(cr.top + cr.height / 2 - fc.yForT(0.4)) < 1.5, 'Abweichung ' + Math.abs(cr.top + cr.height / 2 - fc.yForT(0.4)).toFixed(2) + ' px');
+    await sleep(120);
+    check('Fader: Klick in den Schlitz springt dorthin und sendet', Math.abs(parseFloat(fc.value) - 0.4) < 0.01 && Math.abs(mockFader() - 0.4) < 0.01, 'Fader ' + fc.value + ', Pult ' + mockFader());
+    fp('pointerdown', fcap, fc.yForT(0.4)); fp('pointermove', fcap, fc.yForT(0.4) - 20);
+    const moved = parseFloat(fc.value);
+    const cr2 = fcap.getBoundingClientRect();
+    const before20 = fc.yForT(0.4);
+    check('Fader: Kappe folgt dem Zeiger 1:1 beim Ziehen', Math.abs((before20 - (cr2.top + cr2.height / 2)) - 20) < 1.5, 'Kappe bewegte sich ' + (before20 - (cr2.top + cr2.height / 2)).toFixed(1) + ' px bei 20 px Zeigerbewegung');
+    fp('pointerup', fcap, fc.yForT(0.4) - 20);
+    check('Fader: Kappe ziehen bewegt relativ (20 px hoch)', Math.abs(moved - (0.4 + 20 / trav)) < 0.004, 'Wert ' + moved.toFixed(3) + ', erwartet ' + (0.4 + 20 / trav).toFixed(3));
+    fc.value = 0.4;
+    fp('pointerdown', fcap, fc.yForT(0.4), { shiftKey: true }); fp('pointermove', fcap, fc.yForT(0.4) - 100, { shiftKey: true });
+    const fine = parseFloat(fc.value);
+    fp('pointerup', fcap, fc.yForT(0.4) - 100, { shiftKey: true });
+    check('Fader: Shift = Feineinstellung (nur ein Fünftel der Bewegung)', Math.abs(fine - (0.4 + 100 / trav * 0.2)) < 0.004, 'Wert ' + fine.toFixed(3));
+    fp('pointerdown', fc, fc.yForT(0.746)); fp('pointerup', fc, fc.yForT(0.746));
+    check('Fader: rastet bei 0 dB ein', parseFloat(fc.value) === 0.75, 'Wert ' + fc.value);
+    fc.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }));
+    check('Fader: Mausrad nach oben erhöht', Math.abs(parseFloat(fc.value) - 0.78) < 0.002, 'Wert ' + fc.value);
+    fc.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    check('Fader: Pfeiltaste runter -0.01', Math.abs(parseFloat(fc.value) - 0.77) < 0.002, 'Wert ' + fc.value);
+    fc.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await sleep(120);
+    check('Fader: Doppelklick setzt 0 dB (Anzeige und Pult)', Math.abs(parseFloat(fc.value) - 0.75) < 1e-6 && Math.abs(mockFader() - 0.75) < 1e-6 && stripUI['ch10'].dbLabel.textContent === '0.0', stripUI['ch10'].dbLabel.textContent + ' dB');
+
     // Mute
     stripUI['ch03'].muteBtn.click();
     await sleep(60);
@@ -86,18 +124,18 @@ window.__mockInit = (mock) => {
 
     // Regressionstest: Fader angeklickt (behält Fokus), danach am Pult verschoben -> App muss folgen
     const fe = stripUI['ch09'].fader; fe.focus();
-    fe.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    window.dispatchEvent(new PointerEvent('pointerup'));
+    fe.capElement.dispatchEvent(new PointerEvent('pointerdown', { clientY: fe.yForT(parseFloat(fe.value)), pointerId: 1, bubbles: true }));
+    fe.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
     __ctl.mock.surfaceChange('/ch/09/mix/fader', 0.25);
     const follow = await waitFor(() => Math.abs(parseFloat(fe.value) - 0.25) < 1e-4, 500);
     check('angeklickter Fader folgt weiter dem Pult (kein Fokus-Problem)', follow && document.activeElement === fe, 'Wert ' + fe.value);
     // während des Ziehens wird die Anzeige nicht vom Pult überschrieben
-    fe.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    fe.capElement.dispatchEvent(new PointerEvent('pointerdown', { clientY: fe.yForT(parseFloat(fe.value)), pointerId: 1, bubbles: true }));
     fe.value = 0.9; fe.dispatchEvent(new Event('input', { bubbles: true }));
     __ctl.mock.surfaceChange('/ch/09/mix/fader', 0.1);
     await sleep(80);
     check('beim Ziehen bleibt der Schieber unter dem Finger', Math.abs(parseFloat(fe.value) - 0.9) < 1e-4, 'Wert ' + fe.value);
-    window.dispatchEvent(new PointerEvent('pointerup'));
+    fe.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
 
     // Ebenen
     setLayer('bus'); await sleep(400);

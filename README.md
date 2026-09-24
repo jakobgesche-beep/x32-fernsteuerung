@@ -49,8 +49,11 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
 - **Alle Zeilen des Pults** in fünf Ebenen: Kanäle 1–32, Aux/FX-Returns,
   Busse 1–16, Matrizen/Main LR/Mono, DCA 1–8
 - Fader-Streifen wie am Pult: **Icon** (eigene Piktogramme für die 74
-  X32-Icons), **Name und Farbe** aus dem Pult, Fader mit dB-Anzeige
-  (Doppelklick = 0 dB), Mute, Live-Pegel (dB-Skala, Main mit L/R)
+  X32-Icons), **Name und Farbe** aus dem Pult, Mute, Live-Pegel (dB-Skala,
+  Main mit L/R) und ein eigener **Pult-Fader**: langer Schlitz, breite
+  Silberkappe mit Farbstrich in der Kanalfarbe, dB-Skala. Bedienung: Kappe
+  ziehen, in den Schlitz klicken (springt hin), **Shift** = Feineinstellung,
+  rastet bei 0 dB ein, Mausrad, Pfeiltasten, Doppelklick = 0 dB
 - Klick auf den Namen öffnet die Processing-Ansicht, nachgebaut nach den
   X32-Seiten (und Elementen der Allen&Heath-Avantis-Oberfläche):
   - **EQ**: große Kurve mit farbigen Ring-Markern (Ziehen = Frequenz & Gain,
@@ -133,7 +136,7 @@ preload.js            sichere Brücke zur Oberfläche (window.x32API)
 shared/osc.js         OSC-Codec (reines JS, läuft auch im Browser-Test)
 shared/values.js      Umrechnungen, Parameter-Spezifikation, Definition aller Kanaltypen
 shared/client.js      Verbindungsschicht (Zwischenspeicher, Fenster, Nachgleich, Reconnect)
-renderer/             Oberfläche: store.js (Spiegel des Zwischenspeichers), icons.js,
+renderer/             Oberfläche: store.js (Spiegel des Zwischenspeichers), icons.js, fader.js,
                       app.js (Ebenen/Fader-Streifen), processing.js (EQ/Kompressor)
 test/                 Tests und simuliertes X32 (nicht Teil der App)
 ```
