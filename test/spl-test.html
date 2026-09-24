@@ -120,6 +120,19 @@ check('A-Bewertung bei 1 kHz = 0 dB, 100 Hz = -19,1 dB, 10 kHz = -2,5 dB',
   check('Stille: keine Werte statt Fehler', s.leq === -Infinity && s.fast === -Infinity && s.peak === -Infinity);
 }
 
+// ---- Pegelverlauf (Leq je Sekunde) ----
+{
+  const fs = 48000, m = new SplMeter(fs, { leqWindowSec: 4 });
+  feed(m, sine(fs, 1000, 0.1, 3)); feed(m, new Float32Array(fs * 2));
+  const h = m.snapshot() && m.history('A');
+  check('Verlauf: 5 volle Sekunden = 3 Ton (-23,0) + 2 Stille', h.values.length === 4 && h.first === 1 && near(h.values[0], dbfs(0.1), 0.3) && h.values[3] === -Infinity, JSON.stringify(h.values.map((v) => isFinite(v) ? +v.toFixed(1) : '-oo')) + ' erste=' + h.first);
+  const m2 = new SplMeter(fs); feed(m2, sine(fs, 1000, 0.1, 2.5));
+  const h2 = m2.history('A');
+  check('Verlauf: nur volle Sekunden (2,5 s -> 2 Werte), beginnt bei Sekunde 0', h2.values.length === 2 && h2.first === 0 && near(h2.values[1], dbfs(0.1), 0.2), h2.values.length + ' Werte');
+  m2.resetAll();
+  check('Verlauf: nach resetAll leer', m2.history('A').values.length === 0);
+}
+
 // ---- Kalibrier-Messfenster ----
 {
   const fs = 48000, amp = 0.05, m = new SplMeter(fs);

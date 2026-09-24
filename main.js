@@ -201,6 +201,15 @@ ipcMain.handle("rew-choose", async () => {
   writeSettings({ rewPath: p });
   return { ok: true, path: p };
 });
+// Textdatei (z. B. CSV-Protokoll) über den Speichern-Dialog ablegen: Ort wählt der Nutzer
+ipcMain.handle("save-text-file", async (event, name, text) => {
+  if (typeof name !== "string" || typeof text !== "string" || text.length > 5000000) return { ok: false, error: "Ungültige Daten." };
+  const safe = path.basename(name).replace(/[^\w.\- äöüÄÖÜß]/g, "_").slice(0, 80) || "Protokoll.csv";
+  const res = await dialog.showSaveDialog(mainWindow, { title: "Protokoll speichern", defaultPath: path.join(app.getPath("documents"), safe) });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try { fs.writeFileSync(res.filePath, "\ufeff" + text, "utf8"); return { ok: true, path: res.filePath }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
 ipcMain.handle("rew-download", async () => { await shell.openExternal("https://www.roomeqwizard.com/"); return true; });
 
 function createWindow() {

@@ -131,6 +131,7 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/client-test.html` — Verbindungsschicht gegen das simulierte Pult
 - `test/e2e.html?test=1` — Oberfläche + Verbindungsschicht + simuliertes Pult
 - `test/latency-test.html` — Latenz-Messung unter fünf Netz-/Pult-Bedingungen
+- `test/calc-test.html` — Rechner (Delay, Tempo, Pegel, Ton)
 - `test/spl-test.html` — Pegel-Rechnung (Bewertungskurven, Fast/Slow, Leq, Terzbänder) und REW-Suche mit erzeugten Signalen
 - `test/measure-test.html` — Messung Ende zu Ende mit simuliertem Mikrofon; braucht Echtzeit und einen kleinen Hilfsserver
   (Chrome mit `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=ton.wav`, Ton: links 1 kHz mit -23 dBFS)
@@ -165,6 +166,23 @@ kurzer Abstand oder Kabel/USB-C-LAN-Adapter zum Router; AirDrop und Handoff am
 Mac ausschalten (stören das WLAN gelegentlich); der Router nur für die Anlage.
 Unter etwa 50 ms fühlt sich nichts mehr verzögert an – der Motor-Fader am Pult
 selbst braucht ohnehin länger.
+
+## Weitere Funktionen (Version 2.5)
+
+- **Automatisch verbinden**: beim Start sucht die App das Pult im Netzwerk; genau eins gefunden (oder das zuletzt benutzte
+  dabei) = verbinden, mehrere = Auswahl. Abschaltbar auf dem Startbildschirm (`x32-auto` im lokalen Speicher).
+- **Spitzenwert und Übersteuerung**: jeder Kanalzug mit Meter hält den höchsten Pegel 1,2 s als Strich fest; die rote Lampe
+  oben rechts leuchtet ab 0,98 (ca. -0,2 dBFS) und bleibt an, bis man sie anklickt.
+- **Szenen** (`renderer/scenes.js`): Fader/Mute aller Kanalzüge (optional Namen, Farben, Icons) lokal speichern und laden.
+  Laden fragt nach (nennt die Zahl der Änderungen), schickt nur echte Unterschiede (~240 Werte/s) und sichert den alten
+  Stand für "Rückgängig". Die Szenen liegen nur in der App, nicht im Pult.
+- **Werkzeuge** (`renderer/tools.js`, `shared/calc.js`): Laufzeit/Delay aus Entfernung und Temperatur, Echo-Zeiten nach Tempo
+  (mit Tippen), Pegel über Entfernung und Addition mehrerer Quellen, Frequenz -> Wellenlänge/Ton, dB-Umrechnung.
+- **Pegelverlauf und Protokoll** in der Messung: Leq je Sekunde bis 30 Minuten, "Protokoll speichern" schreibt eine CSV
+  (Semikolon, Dezimalkomma) über den Speichern-Dialog.
+- **Neu in dieser Version**: Fenster einmal nach einem Update (`renderer/changelog.js`).
+
+Jede Funktion steckt in einer eigenen Datei bzw. einem eigenen Commit und lässt sich einzeln wieder entfernen.
 
 ## Messung (dB-Meter, Spektrum, REW)
 

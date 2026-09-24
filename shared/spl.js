@@ -80,7 +80,7 @@
         msF: 0, msS: 0, maxF: 0, maxS: 0, peak: 0,
         sumSq: 0, n: 0,
         cs: 0, cn: 0, bs: new Float64Array(this.windowSec), bn: new Float64Array(this.windowSec), pos: 0, totSum: 0, totN: 0,
-        capSum: 0, capN: 0,
+        capSum: 0, capN: 0, count: 0,
         };
       });
       this.dcX = 0; this.dcY = 0;
@@ -118,6 +118,7 @@
             ch.totSum += ch.cs - ch.bs[ch.pos]; ch.totN += ch.cn - ch.bn[ch.pos];
             ch.bs[ch.pos] = ch.cs; ch.bn[ch.pos] = ch.cn;
             ch.pos = (ch.pos + 1) % this.windowSec;
+            ch.count++;
             ch.cs = 0; ch.cn = 0;
           }
           if (capturing) { ch.capSum += y2; ch.capN++; }
@@ -144,13 +145,25 @@
       return out;
     }
 
+    // Pegelverlauf: Leq je volle Sekunde (dBFS), älteste zuerst, höchstens leqWindowSec Werte.
+    // first = laufende Nummer der ersten Sekunde seit dem Start (0 = erste Sekunde).
+    history(weighting) {
+      const ch = this.chains.find((c) => c.name === (weighting || "A"));
+      const n = Math.min(ch.count, this.windowSec), out = new Array(n);
+      for (let k = 0; k < n; k++) {
+        const i = (ch.pos - n + k + this.windowSec * 2) % this.windowSec;
+        out[k] = ch.bn[i] ? db(ch.bs[i] / ch.bn[i]) : -Infinity;
+      }
+      return { values: out, first: ch.count - n };
+    }
+
     // Leq, Maximum und Spitze neu starten (der gleitende 30-min-Leq läuft weiter)
     resetHold() {
       for (const ch of this.chains) { ch.maxF = 0; ch.maxS = 0; ch.peak = 0; ch.sumSq = 0; ch.n = 0; }
     }
     resetAll() {
       this.resetHold();
-      for (const ch of this.chains) { ch.bs.fill(0); ch.bn.fill(0); ch.cs = 0; ch.cn = 0; ch.totSum = 0; ch.totN = 0; ch.pos = 0; }
+      for (const ch of this.chains) { ch.bs.fill(0); ch.bn.fill(0); ch.cs = 0; ch.cn = 0; ch.totSum = 0; ch.totN = 0; ch.pos = 0; ch.count = 0; }
     }
 
     // Kalibrier-Messfenster: Mittelpegel über die Zeit seit beginCapture()

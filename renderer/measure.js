@@ -153,6 +153,12 @@ registerProcessor('x32-tap', X32Tap);`;
         <div class="m-card-title">Spektrum (Terzbänder) <span id="m-rta-read" class="m-rta-read"></span></div>
         <canvas id="m-rta" class="m-rta"></canvas>
       </section>
+
+      <section class="m-card m-rta-card">
+        <div class="m-card-title">Pegelverlauf <span class="m-hint">Leq je Sekunde, bis zu 30 Minuten</span><span id="m-hist-read" class="m-rta-read"></span>
+          <button id="m-hist-save" class="btn secondary small">Protokoll speichern (CSV)</button></div>
+        <canvas id="m-hist" class="m-rta m-hist"></canvas>
+      </section>
     </div>
 
     <div class="m-col m-side">
@@ -193,7 +199,7 @@ registerProcessor('x32-tap', X32Tap);`;
       value: q('m-value'), unit: q('m-unit'), weight: q('m-weight'), tc: q('m-tc'),
       barFill: q('m-bar-fill'), barMax: q('m-bar-max'), barLimit: q('m-bar-limit'), barScale: q('m-bar-scale'),
       leq: q('m-leq'), leq30: q('m-leq30'), leq30s: q('m-leq30-s'), leq30card: q('m-leq30-card'), max: q('m-max'), maxK: q('m-max-k'), peak: q('m-peak'), reset: q('m-reset'),
-      canvas: q('m-rta'), rtaRead: q('m-rta-read'),
+      canvas: q('m-rta'), rtaRead: q('m-rta-read'), hist: q('m-hist'), histRead: q('m-hist-read'), histSave: q('m-hist-save'),
       ref: q('m-ref'), cal: q('m-cal'), calReset: q('m-cal-reset'), calBadge: q('m-cal-badge'), calInfo: q('m-cal-info'),
       limitOn: q('m-limit-on'), limit: q('m-limit'),
       rewInfo: q('m-rew-info'), rewOpen: q('m-rew-open'), rewChoose: q('m-rew-choose'), rewDl: q('m-rew-dl'),
@@ -219,12 +225,13 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.calReset.addEventListener('click', () => { delete cals[calKey()]; save(CAL_KEY, cals); updateCalUi(); buildScale(); paintText(true); });
     ui.limitOn.addEventListener('change', () => { cfg.limitOn = ui.limitOn.checked; persistCfg(); paintText(true); });
     ui.limit.addEventListener('change', () => { cfg.limit = clamp(parseFloat(ui.limit.value) || 99, 30, 140); ui.limit.value = cfg.limit; persistCfg(); paintText(true); });
+    ui.histSave.addEventListener('click', saveProtocol);
     ui.rewOpen.addEventListener('click', openRew);
     ui.rewChoose.addEventListener('click', chooseRew);
     ui.rewDl.addEventListener('click', () => api.rewDownload());
     ui.canvas.addEventListener('mousemove', (e) => { const r = ui.canvas.getBoundingClientRect(); S.hover = Math.floor((e.clientX - r.left - RTA.left) / ((r.width - RTA.left - RTA.right) / SPL.THIRD_OCTAVE_CENTERS.length)); drawRta(); });
     ui.canvas.addEventListener('mouseleave', () => { S.hover = -1; drawRta(); });
-    if (typeof ResizeObserver === 'function') new ResizeObserver(() => drawRta()).observe(ui.canvas);
+    if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { drawRta(); drawHist(); }); ro.observe(ui.canvas); ro.observe(ui.hist); }
     if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => { if (S.visible && S.perm === 'granted') refreshDevices(); });
     syncControls(); updateCalUi(); buildScale(); paintText(true); drawRta();
   }
@@ -299,6 +306,7 @@ registerProcessor('x32-tap', X32Tap);`;
   // ---------- Start / Stop ----------
   function freshMeters() {
     S.meter = new SPL.SplMeter(S.fs); S.spectrum = new SPL.Spectrum(S.fs, FFT_SIZE);
+    S.startedAt = Date.now(); histCount = -1;
     S.avg = null; S.hold = new Float64Array(SPL.THIRD_OCTAVE_CENTERS.length).fill(-Infinity); S.levels = null; S.snap = null; S.warm = false;
     S.calibrating = null;
   }
@@ -422,6 +430,8 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.max.textContent = w ? fmt(cfg.tc === 'fast' ? w.maxFast : w.maxSlow) : '–';
     ui.peak.textContent = w ? fmt(w.peak) : '–';
     paintBar();
+    const cnt = S.meter ? S.meter.chains[0].count : 0;
+    if (force || cnt !== histCount) { histCount = cnt; drawHist(); }
   }
 
   // Spektrum
@@ -473,6 +483,93 @@ registerProcessor('x32-tap', X32Tap);`;
     }
     const hi_ = S.hover >= 0 && S.hover < n && S.levels ? S.hover : -1;
     ui.rtaRead.textContent = hi_ >= 0 ? SPL.THIRD_OCTAVE_LABELS[hi_] + ' Hz: ' + (isFinite(S.levels[hi_]) ? (S.levels[hi_] + (offset() || 0)).toFixed(1) : '–') + (offset() === null ? ' dBFS' : ' dB') : '';
+  }
+
+  // Pegelverlauf: Leq je Sekunde, links älteste, rechts jetzt
+  let histCount = -1;
+  function drawHist() {
+    const c = ui && ui.hist;
+    if (!c) return;
+    const dpr = window.devicePixelRatio || 1, cw = c.clientWidth, ch = c.clientHeight;
+    if (!cw || !ch) return;
+    if (c.width !== Math.round(cw * dpr) || c.height !== Math.round(ch * dpr)) { c.width = Math.round(cw * dpr); c.height = Math.round(ch * dpr); }
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, ch);
+    const H = { left: 34, right: 8, top: 8, bottom: 20 };
+    const x0 = H.left, x1 = cw - H.right, y0 = H.top, y1 = ch - H.bottom;
+    const [lo, hi] = range();
+    const yOf = (v) => y1 - clamp((v - lo) / (hi - lo), 0, 1) * (y1 - y0);
+    g.font = '10px "IBM Plex Mono", monospace'; g.textBaseline = 'middle';
+    for (let v = lo; v <= hi; v += (offset() === null ? 30 : 20)) {
+      g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x0, Math.round(yOf(v)) + 0.5); g.lineTo(x1, Math.round(yOf(v)) + 0.5); g.stroke();
+      g.fillStyle = '#7C8698'; g.textAlign = 'right'; g.fillText(v, x0 - 5, yOf(v));
+    }
+    const h = S.meter ? S.meter.history(cfg.weighting) : { values: [], first: 0 };
+    const n = h.values.length, span = Math.max(60, n);            // erste Minute: Linie wächst von links
+    const xOf = (k) => x0 + (k + 0.5) / span * (x1 - x0);
+    g.fillStyle = '#7C8698'; g.textBaseline = 'top'; g.textAlign = 'left';
+    g.fillText(span >= 120 ? '-' + Math.round(span / 60) + ' min' : '-' + span + ' s', x0, y1 + 5);
+    g.textAlign = 'right'; g.fillText('jetzt', x1, y1 + 5);
+    if (cfg.limitOn && offset() !== null && cfg.weighting === 'A') {
+      g.strokeStyle = 'rgba(225,96,76,0.9)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(x0, yOf(cfg.limit)); g.lineTo(x1, yOf(cfg.limit)); g.stroke(); g.setLineDash([]);
+    }
+    if (n) {
+      const grad = g.createLinearGradient(0, y1, 0, y0); grad.addColorStop(0, '#1E93B0'); grad.addColorStop(1, '#8EEBFA');
+      g.strokeStyle = '#3DC7E8'; g.lineWidth = 1.6; g.lineJoin = 'round'; g.beginPath();
+      let pen = false;
+      h.values.forEach((v, k) => {
+        const l = level(v);
+        if (l === null) { pen = false; return; }
+        if (pen) g.lineTo(xOf(k), yOf(l)); else { g.moveTo(xOf(k), yOf(l)); pen = true; }
+      });
+      g.stroke();
+      const finite = h.values.filter(isFinite);
+      const w = S.snap && S.snap.w[cfg.weighting];
+      ui.histRead.textContent = finite.length ? 'Max ' + fmt(Math.max(...finite)) + ' · Leq ' + fmt(w ? w.leq : -Infinity) + (offset() === null ? ' dBFS' : ' dB') : '';
+    } else {
+      ui.histRead.textContent = '';
+      g.fillStyle = '#7C8698'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(S.running ? 'Sammle Daten…' : 'Messung starten, um den Verlauf zu sehen', (x0 + x1) / 2, (y0 + y1) / 2);
+    }
+  }
+
+  // Protokoll als CSV (Excel-freundlich: Semikolon, Dezimalkomma)
+  const p2 = (n) => String(n).padStart(2, '0');
+  const clock = (d) => p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  function buildCsv() {
+    if (!S.meter) return null;
+    const h = S.meter.history(cfg.weighting);
+    if (!h.values.length) return null;
+    const o = offset(), w = cfg.weighting, snap = S.meter.snapshot().w[w];
+    const dec = (v) => (isFinite(v) ? (v + (o || 0)).toFixed(1).replace('.', ',') : '');
+    const unitTxt = (o === null ? 'dBFS' : 'dB') + '(' + w + ')';
+    const start = new Date(S.startedAt + (h.first + 1) * 1000);
+    const finite = h.values.filter(isFinite);
+    const lines = [
+      'X32 Fernsteuerung - Pegelprotokoll',
+      'Eingang;' + (cfg.deviceLabel || 'unbekannt'),
+      'Kanal;' + (cfg.channel < 0 ? 'gemittelt' : cfg.channel + 1),
+      'Bewertung;' + w + ' (Leq je Sekunde)',
+      'Kalibriert;' + (o === null ? 'nein (Werte in dBFS, nicht in dB SPL)' : 'ja, Offset ' + o.toFixed(1).replace('.', ',') + ' dB'),
+      'Beginn;' + p2(start.getDate()) + '.' + p2(start.getMonth() + 1) + '.' + start.getFullYear() + ' ' + clock(start),
+      'Dauer;' + h.values.length + ' s',
+      'Leq gesamt (' + unitTxt + ');' + dec(snap.leq),
+      'Hoechster 1-s-Wert (' + unitTxt + ');' + dec(Math.max(...finite)),
+      'Spitze (' + unitTxt + ');' + dec(snap.peak),
+      '',
+      'Uhrzeit;Sekunde;Leq 1 s (' + unitTxt + ')',
+    ];
+    h.values.forEach((v, k) => lines.push(clock(new Date(S.startedAt + (h.first + k + 1) * 1000)) + ';' + (h.first + k + 1) + ';' + dec(v)));
+    return lines.join('\r\n') + '\r\n';
+  }
+  async function saveProtocol() {
+    const csv = buildCsv();
+    if (!csv) { say('Noch keine Messdaten – mindestens 1 Sekunde messen.', true); return; }
+    const d = new Date(S.startedAt);
+    const r = await api.saveTextFile('Pegelprotokoll_' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + '.csv', csv);
+    if (r.ok) say('Protokoll gespeichert.');
+    else if (!r.canceled) say('Speichern fehlgeschlagen: ' + (r.error || 'unbekannt'), true);
   }
 
   // Zeichenschleife: Balken jedes Bild, Zahlen ~8x pro Sekunde, Spektrum ~15x pro Sekunde
@@ -527,6 +624,7 @@ registerProcessor('x32-tap', X32Tap);`;
     hide() { S.visible = false; if (S.running) stop(); },
     start, stop,
     forceScriptProcessor: false,
+    buildCsv, drawHist,
     debug: () => ({ S, cfg, cals, offset: offset(), ui }),
   };
 })();

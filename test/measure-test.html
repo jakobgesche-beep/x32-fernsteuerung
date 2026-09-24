@@ -16,6 +16,7 @@ window.x32API = {
   rewOpen: async () => { window.__calls.push('rewOpen'); return { ok: true }; },
   rewChoose: async () => { window.__calls.push('rewChoose'); return { ok: true, path: '/x/REW.app' }; },
   rewDownload: async () => { window.__calls.push('rewDownload'); return true; },
+  saveTextFile: async (name, text) => { window.__saved = { name, text }; return { ok: true, path: '/tmp/' + name }; },
 };
 window.toast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };
 </script>
@@ -112,6 +113,21 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     clickBtn('m-weight', 'w', 'C'); $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
     check('Warnung nur bei A-Bewertung (bei C keine)', !$('m-value').classList.contains('over')); clickBtn('m-weight', 'w', 'A');
     $('m-limit-on').checked = false; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
+
+    // ---- Pegelverlauf und Protokoll (Kalibrierung ist noch aktiv: 94 dB) ----
+    await until(() => st().meter.chains[0].count >= 4, 8000);
+    Measure.drawHist();
+    const hh = st().meter.history('A');
+    check('Verlauf: mindestens 3 volle Sekunden, Werte um 94 dB (kalibriert)', hh.values.length >= 3 && hh.values.slice(-3).every((v) => near(v + 117.01, 94, 1)), hh.values.map((v) => (v + 117.01).toFixed(1)).join(' '));
+    check('Verlauf: Zeichenfläche und Kopfzeile "Max ... Leq ..."', /Max 9\d[.,]\d/.test($('m-hist-read').textContent) && /Leq/.test($('m-hist-read').textContent), $('m-hist-read').textContent);
+    $('m-hist-save').click(); await sleep(150);
+    const saved = window.__saved;
+    const rows = saved ? saved.text.split('\r\n') : [];
+    check('Protokoll: Dateiname Pegelprotokoll_...csv', saved && /^Pegelprotokoll_\d{4}-\d{2}-\d{2}_\d{4}\.csv$/.test(saved.name), saved && saved.name);
+    check('Protokoll: Kopf mit Eingang, Bewertung A, kalibriert ja, Dauer', /Bewertung;A/.test(saved.text) && /Kalibriert;ja, Offset 117,0/.test(saved.text) && /Dauer;\d+ s/.test(saved.text) && /Eingang;.+/.test(saved.text), rows.slice(0, 8).join(' | '));
+    const table = rows.slice(rows.findIndex((r) => r.startsWith('Uhrzeit')) + 1).filter(Boolean);
+    check('Protokoll: eine Zeile je Sekunde mit Uhrzeit, Sekunde und Wert mit Dezimalkomma (~94,0)', table.length >= 3 && /^\d\d:\d\d:\d\d;\d+;9\d,\d$/.test(table[table.length - 1]), table.length + ' Zeilen, letzte: ' + table[table.length - 1]);
+    check('Protokoll: Leq gesamt und Spitze im Kopf', /Leq gesamt \(dB\(A\)\);9\d,\d/.test(saved.text) && /Spitze \(dB\(A\)\);9\d,\d/.test(saved.text));
 
     // ---- Zurücksetzen ----
     $('m-reset').click(); await sleep(200);
