@@ -1,0 +1,113 @@
+/* Design "Schlicht": flach, neutrale Grautöne, ein ruhiges Blau, Systemschrift. Keine Verläufe, Leuchteffekte oder Schatten.
+   Wirkt nur mit <body class="plain">; ohne die Klasse gilt das klassische Design (style.css). */
+body.plain{
+  --bg:#1c1c1e; --panel:#242426; --panel-2:#2c2c2e; --panel-raised:#2c2c2e;
+  --line:#3a3a3d; --line-soft:rgba(255,255,255,0.07);
+  --accent:#0A84FF; --accent-2:#0A84FF; --accent-dim:#1c3f6b; --accent-ink:#ffffff; --accent-glow:transparent;
+  --tq:#6CB0FF;
+  --text:#e5e5e7; --text-dim:#bcbcc0; --muted:#8b8b90;
+  --ok:#30d158; --ok-dim:#1f6b35; --danger:#ff453a; --danger-dim:#7a2a26;
+  --radius-s:6px; --radius-m:8px;
+  --font-head:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --font-body:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cap-default:#8b8b90;
+  --chart:#6CB0FF; --chart-hi:#9CC8FF; --chart-lo:#3F7FCC;
+  --zones:#30d158 0 70%,#ffd60a 70% 90%,#ff453a 90% 100%;
+  background:var(--bg);
+  font-size:13px;
+}
+
+/* --- Kopfzeile, Reiter --- */
+.plain .topbar{background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;}
+.plain .brand{text-transform:none;font-size:14px;font-weight:600;letter-spacing:0;}
+.plain .brand b{color:var(--text);font-weight:600;}
+.plain .brand-mark{width:12px;height:12px;border-radius:3px;background:var(--accent);box-shadow:none;}
+.plain .version-label{color:var(--muted);}
+.plain .layer-tabs{gap:2px;padding:8px 16px 0;border-bottom:1px solid var(--line);max-width:none;margin:0;}
+.plain .layer-tab{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;color:var(--muted);font-family:var(--font-body);font-size:13px;letter-spacing:0;padding:8px 12px;margin-bottom:-1px;}
+.plain .layer-tab:hover{color:var(--text);}
+.plain .layer-tab.on{background:none;color:var(--text);border-bottom-color:var(--accent);}
+
+/* --- Knöpfe, Felder, Status --- */
+.plain .btn{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-s);font-family:var(--font-body);font-weight:500;font-size:13px;text-transform:none;letter-spacing:0;box-shadow:none;padding:8px 14px;}
+.plain .btn.small{padding:5px 10px;font-size:12px;}
+.plain .btn:hover{filter:brightness(1.1);}
+.plain .btn.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--line);}
+.plain .btn.secondary:hover{background:#343437;filter:none;}
+.plain .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--danger-dim);}
+.plain .btn.running{background:var(--danger);color:#fff;box-shadow:none;}
+.plain .conn-row input,.plain .lp-sel,.plain .lp input[type=number],.plain .t-input,.plain .scene-name,.plain .up-search{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius-s);}
+.plain .badge{background:none;border-radius:12px;text-transform:none;letter-spacing:0;font-size:11.5px;}
+.plain .badge.live{background:none;color:var(--ok);border-color:var(--ok-dim);}
+.plain .update-bar{background:var(--accent);color:#fff;} .plain .update-bar .btn{background:#fff;color:var(--accent);}
+.plain .design-toggle{border-radius:6px;font-size:11px;}
+
+/* --- Kanalzüge --- */
+.plain .strip-row{gap:6px;padding:10px 2px 20px;}
+.plain .strip{--cap-line:var(--cap-default);flex:0 0 98px;gap:6px;padding:0 6px 8px;border-radius:var(--radius-m);overflow:hidden;background:var(--panel);border:1px solid var(--line);box-shadow:none;}
+.plain .strip::before{content:"";align-self:stretch;height:3px;margin:0 -6px 2px;background:var(--cap-line);}
+.plain .strip.muted{opacity:0.5;}
+.plain .strip-num{color:var(--muted);font-size:9.5px;letter-spacing:0.02em;text-transform:none;}
+.plain .strip-plate{background:transparent !important;border-color:transparent !important;color:var(--text) !important;min-height:56px;gap:3px;padding:2px;border-radius:6px;}
+.plain .strip-plate:hover{background:var(--panel-2) !important;}
+.plain .strip-icon{width:28px;height:28px;border-radius:0;background:none;box-shadow:none;color:var(--text-dim);}
+.plain .strip-name{font-size:11px;font-weight:600;color:var(--text);}
+.plain .db-label{color:var(--text);font-size:12px;font-weight:500;}
+.plain .mute-btn{border-radius:5px;padding:5px 0;background:var(--panel-2);border-color:var(--line);color:var(--text-dim);font-family:var(--font-body);font-size:10.5px;font-weight:600;letter-spacing:0.03em;}
+.plain .mute-btn.active{background:#c8362d;border-color:#c8362d;color:#fff;box-shadow:none;}
+.plain .clip-led{top:8px;width:8px;height:8px;border-color:#3d2523;background:#2b1a19;}
+.plain .clip-led.on{background:#ff453a;border-color:#ff453a;box-shadow:none;}
+.plain .pin-btn{top:5px;} .plain .pin-btn.on{color:#ffd60a;}
+
+/* Meter und Fader flach */
+.plain .meter-track{width:9px;border-radius:2px;border:1px solid #000;background:linear-gradient(0deg,var(--zones));}
+.plain .meter-fill{background:#111113;}
+.plain .meter-peak{background:#fff;box-shadow:none;}
+.plain .fader-track{background:#0e0e10;box-shadow:none;border:1px solid #333;}
+.plain .fader-fill{display:none;}
+.plain .fader-cap{border-radius:3px;background:#cfcfd3;box-shadow:0 1px 0 rgba(0,0,0,0.5);border:1px solid #8b8b90;}
+.plain .fader-cap::before{display:none;}
+.plain .fader-cap-line{height:3px;margin-top:-1.5px;box-shadow:none;border-radius:1px;background:var(--cap-line);}
+.plain .fader-tick span{color:#77777c;} .plain .fader-tick.zero span{color:var(--text);}
+.plain .fader-tick::after{border-top-color:#55555a;}
+.plain .fader:focus-visible .fader-cap{outline-color:var(--accent);}
+.plain .strip.muted .fader-cap{filter:none;background:#777;}
+.plain .dock{background:none;border-left:1px solid var(--line);}
+
+/* Mini-Anzeigen */
+.plain .mini canvas,.plain .mini-gr{background:#151517;border-color:var(--line);border-radius:3px;}
+.plain .mini-gr i{background:#ffb340;}
+
+/* --- Übersicht, Live-Pegel --- */
+.plain .overview{padding-top:8px;}
+.plain .ov-card,.plain .t-card,.plain .scene-row{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-m);box-shadow:none;}
+.plain .ov-title,.plain .lp-title,.plain .t-title,.plain .m-card-title{font-family:var(--font-body);font-weight:600;font-size:13px;}
+.plain .ov-bar-title,.plain .lp-chart-title{color:var(--muted);letter-spacing:0.04em;}
+.plain .m-value{color:var(--text);font-weight:500;}
+.plain .m-unit{color:var(--muted);font-family:var(--font-body);}
+.plain .m-bar,.plain .ov-mbar{background:linear-gradient(90deg,var(--zones));border-color:#000;border-radius:3px;}
+.plain .m-bar-fill{background:#111113;} .plain .ov-mbar::after{background:#111113;}
+.plain .m-bar-limit{box-shadow:none;}
+.plain .ov-stat{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;}
+.plain .ov-stat b{color:var(--text);font-weight:500;}
+.plain .ov-chip{border-radius:5px;background:var(--panel-2);}
+.plain .ov-chip.clip{background:rgba(255,69,58,0.15);border-color:#ff453a;color:#ff8f88;}
+.plain .m-badge{border-radius:10px;text-transform:none;letter-spacing:0;font-size:10.5px;}
+.plain .lp-gear{border-radius:6px;} .plain .lp-gear:hover,.plain .lp-gear.on{color:var(--accent);border-color:var(--accent);}
+.plain .m-rta-read{color:var(--tq);} .plain .lp-link:hover{color:var(--tq);}
+
+/* --- Fenster, Werkzeuge, Szenen --- */
+.plain .overlay{background:rgba(0,0,0,0.6);backdrop-filter:none;}
+.plain .detail-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-m);box-shadow:none;}
+.plain .section-title{text-transform:none;letter-spacing:0;font-size:13px;color:var(--text);}
+.plain .t-result{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;}
+.plain .t-result b{color:var(--text);font-weight:500;}
+.plain .scene-undo{background:rgba(255,214,10,0.08);border-color:#6b5b10;color:#ffd60a;}
+.plain .connect-hint{background:rgba(28,28,30,0.78);backdrop-filter:none;}
+.plain .connect-hint .hint-title{font-size:20px;font-weight:600;}
+.plain .changelog-item b{color:var(--text);}
+.plain .up-item.on .up-check{color:var(--ok);}
+.plain .offline-bar{background:rgba(10,132,255,0.1);border-color:#1c3f6b;color:#b8d6ff;border-radius:6px;} .plain .badge.offline-mode{color:#8ec1ff;border-color:#1c3f6b;background:none;}
+.plain .offline-bar.info{background:rgba(255,214,10,0.08);border-color:#6b5b10;color:#ffd60a;}
+.plain .user-empty{border-radius:8px;}

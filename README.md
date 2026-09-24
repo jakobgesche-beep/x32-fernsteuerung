@@ -132,6 +132,7 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/e2e.html?test=1` — Oberfläche + Verbindungsschicht + simuliertes Pult
 - `test/latency-test.html` — Latenz-Messung unter fünf Netz-/Pult-Bedingungen
 - `test/calc-test.html` — Rechner (Delay, Tempo, Pegel, Ton)
+- `test/e2e.html?test=1` prüft auch Mini-Anzeigen (Pixel der Kurven) und Meine Seite
 - `test/offline-test.html` — Startwerte für alle Parameter und der Offline-Speicher
 - `test/spl-test.html` — Pegel-Rechnung (Bewertungskurven, Fast/Slow, Leq, Terzbänder) und REW-Suche mit erzeugten Signalen
 - `test/measure-test.html` — Messung Ende zu Ende mit simuliertem Mikrofon; braucht Echtzeit und einen kleinen Hilfsserver
@@ -185,7 +186,7 @@ selbst braucht ohnehin länger.
 
 Jede Funktion steckt in einer eigenen Datei bzw. einem eigenen Commit und lässt sich einzeln wieder entfernen.
 
-## Live-Pegel, Übersicht und REW (Version 2.6)
+## Live-Pegel, Übersicht und REW (seit Version 2.6)
 
 Über den Fadern liegt eine **Übersicht** (mit dem Pfeil oben einklappbar):
 
@@ -203,7 +204,7 @@ Jede Funktion steckt in einer eigenen Datei bzw. einem eigenen Commit und lässt
 Rechnung in `shared/spl.js` (Bewertungsfilter A/C/Z nach IEC 61672, Fast/Slow, Leq, Spitze, Terzbänder), REW-Suche in `shared/rew.js`,
 Aufnahme über AudioWorklet mit ScriptProcessor als Ersatz, Mikrofon-Freigabe und REW-Start in `main.js`.
 
-## Offline-Modus (Version 2.6)
+## Offline-Modus (seit Version 2.6)
 
 Knopf **Offline-Modus** (Kopfzeile oder Startbildschirm): die ganze Oberfläche läuft ohne Pult mit Startwerten
 (`X32V.defaultWire`: Fader 0 dB, EQ glatt, Kompressor/Gate aus). Änderungen wirken nur in der App, bleiben im lokalen Speicher
@@ -211,10 +212,21 @@ Knopf **Offline-Modus** (Kopfzeile oder Startbildschirm): die ganze Oberfläche 
 Einstellungen" mit **Aufs Pult übertragen** (nach Rückfrage, gebremst mit ~240 Werten/s; es werden nur Werte geschrieben, die vom
 Startwert abweichen) oder Verwerfen.
 
-## Design (Version 2.6)
+## Mini-Anzeigen und "Meine Seite" (Version 2.7)
 
-Standard ist **Studio** (`renderer/design-studio.css`, Klasse `studio` am `<body>`): Graphit, Bernstein, LED-Meter, farbige
-Kanalköpfe. Oben links schaltet "Design" auf **Klassisch** (das bisherige Türkis-Design) um; die Wahl wird gemerkt.
+- **Mini-Anzeigen über jedem Fader** (`renderer/minis.js`): EQ-Kurve (inkl. Low Cut), Kompressor-Kennlinie mit
+  Gain-Reduction-Balken (Meter-Strom 1 bzw. 2) und Spitzenpegel/GR als Zahl. Gerechnet mit denselben Funktionen wie die
+  EQ-/Kompressor-Seite (`shared/eqmath.js`), Klick öffnet die jeweilige Seite. Die Werte dafür (ca. 35 je Kanalzug) werden für
+  die sichtbare Ebene nachgeladen; Änderungen am Pult kommen per `/xremote`.
+- **Meine Seite** (`renderer/userpage.js`): eigene Ebene mit selbst gewählten Kanalzügen aus allen Ebenen (Kanäle, Aux, FX,
+  Bus, Matrix, DCA) in eigener Reihenfolge. Stern am Kanalzug oder Fenster "Bearbeiten" (mit Suche und "nur benannte").
+  Auswahl und zuletzt benutzte Ebene liegen im lokalen Speicher.
+
+## Design (Version 2.7)
+
+Standard ist **Schlicht** (`renderer/design-plain.css`, Klasse `plain` am `<body>`): flach, neutrale Grautöne, Systemschrift,
+ein ruhiges Blau, keine Verläufe oder Leuchteffekte. Oben links schaltet "Design" auf **Klassisch** (das frühere
+Türkis-Design) um; die Wahl wird gemerkt.
 
 ## Ungetestet an echter Hardware
 

@@ -16,14 +16,14 @@ const Overview = (function () {
     const bar = el('<div class="ov-bar"><span class="ov-bar-title">Übersicht</span><button class="ov-toggle" title="Übersicht ein-/ausklappen" aria-label="Übersicht ein- oder ausklappen">▾</button></div>');
     const grid = el('<div class="ov-grid"></div>');
     const live = el('<section class="ov-card ov-live" id="live-panel"></section>');
-    const side = el('<div class="ov-side"></div>');
-    const main = el('<section class="ov-card ov-main"><div class="ov-title">Main LR <button class="clip-led ov-clip" title="Übersteuerung – Klick zum Zurücksetzen" aria-label="Übersteuerung zurücksetzen"></button></div>' +
+    const side = el('<section class="ov-card ov-side"></section>');
+    const main = el('<div class="ov-main"><div class="ov-title">Main LR <button class="clip-led ov-clip" title="Übersteuerung – Klick zum Zurücksetzen" aria-label="Übersteuerung zurücksetzen"></button></div>' +
       ['L', 'R'].map((c, i) => '<div class="ov-mrow"><span>' + c + '</span><div class="ov-mbar"><div class="ov-mfill" data-i="' + i + '"></div><div class="ov-mpeak" data-i="' + i + '"></div></div><b data-i="' + i + '">–∞</b></div>').join('') +
-      '<div class="ov-mscale"><span>-60</span><span>-40</span><span>-20</span><span>-10</span><span>0 dBFS</span></div></section>');
-    const glance = el('<section class="ov-card ov-glance"><div class="ov-title">Auf einen Blick</div>' +
+      '<div class="ov-mscale"><span>-60</span><span>-40</span><span>-20</span><span>-10</span><span>0 dBFS</span></div></div>');
+    const glance = el('<div class="ov-glance"><div class="ov-title">Auf einen Blick</div>' +
       '<div class="ov-stats"><div class="ov-stat"><b id="ov-signal">–</b><span>Kanäle mit Signal</span></div><div class="ov-stat"><b id="ov-muted">0</b><span>Kanäle stumm</span></div></div>' +
       '<div class="ov-sub">Übersteuert</div><div class="ov-chips" id="ov-clips"></div>' +
-      '<div class="ov-sub">Stumm</div><div class="ov-chips" id="ov-mutedlist"></div></section>');
+      '<div class="ov-sub">Stumm</div><div class="ov-chips" id="ov-mutedlist"></div></div>');
     side.append(main, glance);
     grid.append(live, side);
     root.append(bar, grid);

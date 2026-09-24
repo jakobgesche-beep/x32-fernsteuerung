@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
-<link rel="stylesheet" href="../renderer/style.css"><link rel="stylesheet" href="../renderer/design-studio.css"></head><body class="studio">
-<header class="topbar"><div class="brand"><span class="brand-mark"></span><span class="brand-text">X32 <b>Fernsteuerung</b></span><span id="version-label" class="version-label"></span><button id="design-btn" class="design-toggle">Design: Studio</button></div>
+<link rel="stylesheet" href="../renderer/style.css"><link rel="stylesheet" href="../renderer/design-plain.css"></head><body class="plain">
+<header class="topbar"><div class="brand"><span class="brand-mark"></span><span class="brand-text">X32 <b>Fernsteuerung</b></span><span id="version-label" class="version-label"></span><button id="design-btn" class="design-toggle">Design: Schlicht</button></div>
 <div class="conn-row"><button id="rew-btn" class="btn secondary small">REW öffnen</button><button id="offline-btn" class="btn secondary small">Offline-Modus</button><button id="scan-btn" class="btn secondary small">Pult suchen</button><input id="ip-input" type="text" placeholder="192.168.0.64" /><button id="connect-btn" class="btn small">Verbinden</button>
 <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div></div></header>
 <nav id="layer-tabs" class="layer-tabs"></nav>
@@ -51,6 +51,9 @@ window.x32API = {
 <script src="../renderer/fader.js"></script>
 <script src="../shared/spl.js"></script>
 <script src="../shared/calc.js"></script>
+<script src="../shared/eqmath.js"></script>
+<script src="../renderer/minis.js"></script>
+<script src="../renderer/userpage.js"></script>
 <script src="../renderer/measure.js"></script>
 <script src="../renderer/tools.js"></script>
 <script src="../renderer/overview.js"></script>

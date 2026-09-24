@@ -317,10 +317,10 @@ window.__mockInit = (mock) => {
 
     // "Neu in dieser Version"
     try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
-    maybeShowChangelog('2.6.0');
+    maybeShowChangelog('2.7.0');
     const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 4;
     document.getElementById('changelog-overlay').querySelector('button').click();
-    maybeShowChangelog('2.6.0');
+    maybeShowChangelog('2.7.0');
     check('Neu-in-Version: erscheint einmal mit Liste, nach "Verstanden" nicht wieder', shown && !document.getElementById('changelog-overlay'));
     maybeShowChangelog('9.9.9');
     check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
@@ -379,13 +379,98 @@ window.__mockInit = (mock) => {
     check('Werkzeuge: Übersicht ausgeblendet', ovEl.hidden);
     document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
     check('zurück zum Pult: Übersicht und Fader wieder da', !ovEl.hidden && !document.getElementById('console').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
-    // Design: Studio (neu) und Klassisch umschaltbar, Wahl wird gemerkt
+    // Mini-Anzeigen über dem Fader
+    setLayer('ch'); await sleep(900);
+    const cu = stripUI['ch02'];
+    check('Mini: Kanäle haben EQ-Kurve, Kompressor-Kennlinie mit Gain-Reduction und Pegel; Aux nur EQ; DCA nichts', !!(cu.mini && cu.mini.eq && cu.mini.tf && cu.mini.grFill && cu.mini.peak) && (() => { setLayer('aux'); const a1 = stripUI['aux1']; const ok = a1.mini && a1.mini.eq && !a1.mini.tf; setLayer('dca'); const okDca = !stripUI['dca1'].mini; setLayer('ch'); return ok && okDca; })());
+    await sleep(700);
+    const chartRgb = (() => { const c = getComputedStyle(document.body).getPropertyValue('--chart').trim(); const m = /#(..)(..)(..)/.exec(c); return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [61, 199, 232]; })();
+    const curveY = (canvas, x) => { const g = canvas.getContext('2d'), d = g.getImageData(x * (canvas.width / canvas.clientWidth), 0, 1, canvas.height).data; let best = null; for(let y = 0; y < canvas.height; y++){ const i = y * 4; if(d[i + 3] > 180 && Math.abs(d[i] - chartRgb[0]) + Math.abs(d[i + 1] - chartRgb[1]) + Math.abs(d[i + 2] - chartRgb[2]) < 90){ best = y; break; } } return best; };
+    const u2eq = stripUI['ch02'].mini.eq;
+    const bandsOk = [1, 2, 3, 4].every((i) => ['type', 'f', 'g', 'q'].every((k) => X.get('/ch/02/eq/' + i + '/' + k) !== undefined));
+    check('Mini: EQ-Werte aller vier Bänder von Kanal 2 wurden fürs Mini geladen', bandsOk);
+    const eqBands = [1, 2, 3, 4].map((i) => ({ type: X.get('/ch/02/eq/' + i + '/type'), f: X.actual('/ch/02/eq/' + i + '/f'), g: X.actual('/ch/02/eq/' + i + '/g'), q: X.actual('/ch/02/eq/' + i + '/q') }));
+    const misc02 = { eqOn: X.get('/ch/02/eq/on'), hpOn: X.get('/ch/02/preamp/hpon'), hpSlope: X.get('/ch/02/preamp/hpslope'), hpf: X.actual('/ch/02/preamp/hpf') };
+    const W2 = u2eq.clientWidth, H2 = u2eq.clientHeight;
+    let worst = 0, checked = 0;
+    for(const f of [60, 200, 1000, 4000, 12000]){
+      const x = Math.round(W2 * Math.log(f / 20) / Math.log(1000)), db = Math.max(-15, Math.min(15, X32EQ.eqResponseDb(f, eqBands, misc02)));
+      const want = H2 / 2 - db * ((H2 / 2 - 2) / 15), got = curveY(u2eq, x);
+      if(got !== null){ worst = Math.max(worst, Math.abs(got - want)); checked++; }
+    }
+    check('Mini: EQ-Kurve von Kanal 2 liegt an den richtigen Stellen (max. 2,5 px Abweichung)', checked >= 4 && worst <= 2.5, checked + ' Punkte, max ' + worst.toFixed(1) + ' px');
+    const bset = (x) => { setLayer('bus'); return stripUI[x]; };
+    const b3 = bset('bus03'); await sleep(1100);
+    const d3 = {}; ['on', 'mode', 'thr', 'ratio', 'knee', 'mgain'].forEach((k) => { d3[k] = X.actual('/bus/03/dyn/' + k); });
+    const tf = b3.mini.tf, TW = tf.clientWidth, TH = tf.clientHeight;
+    const X_ = (db) => 2 + (db + 60) / 60 * (TW - 4), Y_ = (db) => TH - 2 - (db + 60) / 60 * (TH - 4);
+    const yTop = curveY(tf, Math.round(X_(-3))), yThr = curveY(tf, Math.round(X_(-40)));
+    const outAt0 = Math.max(-60, Math.min(0, X32EQ.transferOut(-3, d3)));
+    check('Mini: Kompressor-Kennlinie von Bus 3 (Schwelle -24 dB, 4:1): bei -3 dB Eingang tiefer als 1:1, wie berechnet', yTop !== null && Math.abs(yTop - Y_(outAt0)) <= 2.5 && yTop > Y_(-3) + 3, 'y ' + yTop + ' erwartet ' + Y_(outAt0).toFixed(1) + ' (1:1 wäre ' + Y_(-3).toFixed(1) + ')');
+    check('Mini: unter der Schwelle (-40 dB) läuft die Kurve 1:1', yThr !== null && Math.abs(yThr - Y_(-40)) <= 2.5, 'y ' + yThr + ' erwartet ' + Y_(-40).toFixed(1));
+    setLayer('ch'); await sleep(200);
+    const cg = stripUI['ch01'];
+    const grF = new Float32Array(96); grF[64] = 0.5; __ctl.emitMeter('1', grF);
+    check('Mini: Gain Reduction von Kanal 1 (Faktor 0,5 = 6 dB): Balken 30 % und "GR 6.0"', cg.mini.grv.textContent === 'GR 6.0' && Math.abs(parseFloat(cg.mini.grFill.style.height) - 30) <= 1, cg.mini.grv.textContent + ' / ' + cg.mini.grFill.style.height);
+    grF[64] = 1; __ctl.emitMeter('1', grF);
+    check('Mini: ohne Regelung "GR 0" und leerer Balken', cg.mini.grv.textContent === 'GR 0' && parseFloat(cg.mini.grFill.style.height) === 0);
+    const pkF = new Float32Array(70); pkF[STRIP_BY_ID['ch01'].meter.idx[0]] = 0.5; __ctl.emitMeter('0', pkF);
+    check('Mini: Spitzenpegel als Zahl (0,5 = -6,0 dBFS), nicht rot', cg.mini.peak.textContent === '-6.0' && !cg.mini.peak.classList.contains('hot'), cg.mini.peak.textContent);
+    pkF[STRIP_BY_ID['ch01'].meter.idx[0]] = 0.9; __ctl.emitMeter('0', pkF);
+    check('Mini: ab -3 dBFS wird der Pegel rot (-0,9 dBFS)', cg.mini.peak.textContent === '-0.9' && cg.mini.peak.classList.contains('hot'));
+    check('Mini: Meter-Strom 1 (Gain Reduction der Kanäle) wird angefordert', __ctl.mock.meterUntil.has('1'));
+    cg.mini.eq.click(); await sleep(250);
+    const openedEq = !!document.querySelector('.proc-card') && proc && proc.strip.id === 'ch01' && proc.tab === 'eq';
+    closeDetail();
+    cg.mini.tf.click(); await sleep(250);
+    check('Mini: Klick auf EQ öffnet die EQ-Seite, Klick auf Kompressor die Kompressor-Seite', openedEq && proc && proc.tab === 'dyn', proc && proc.tab);
+    closeDetail(); await sleep(100);
+
+    // Meine Seite
+    try { localStorage.removeItem('x32.userpage'); } catch(e){}
+    UserPage.clear();
+    const upTab = document.querySelector('.layer-tab[data-layer="user"]');
+    check('Meine Seite: Reiter vorhanden', !!upTab && /Meine Seite/.test(upTab.textContent));
+    upTab.click(); await sleep(150);
+    check('Meine Seite: leer zeigt Hinweis und "Bearbeiten"', /Noch leer/.test(app.textContent) && !!app.querySelector('.user-head button') && Object.keys(stripUI).length === 0 && upTab.classList.contains('on'));
+    setLayer('ch'); await sleep(200);
+    stripUI['ch03'].pinEl.click(); stripUI['ch01'].pinEl.click(); UserPage.add('bus03'); await sleep(100);
+    check('Meine Seite: Stern am Kanalzug nimmt ihn auf (★), Reihenfolge = Reihenfolge des Hinzufügens', stripUI['ch03'].pinEl.textContent === '★' && stripUI['ch02'].pinEl.textContent === '☆' && UserPage.ids().join() === 'ch03,ch01,bus03', UserPage.ids().join());
+    upTab.click(); await sleep(1300);
+    check('Meine Seite: zeigt genau diese drei Kanalzüge in dieser Reihenfolge (Kanäle und Bus gemischt)', Object.keys(stripUI).join() === 'ch03,ch01,bus03' && Array.from(app.querySelectorAll('.strip-num')).map((n) => n.textContent).join('|') === 'Ch 03|Ch 01|Bus 03', Array.from(app.querySelectorAll('.strip-num')).map((n) => n.textContent).join('|'));
+    check('Meine Seite: Werte kommen vom Pult (Namen, EQ des Busses für die Mini-Anzeige)', stripUI['ch03'].name.textContent === 'Snare Top' && X.get('/bus/03/eq/1/f') !== undefined && stripUI['bus03'].mini.eq.width > 0);
+    X.setWire('/ch/01/mix/fader', 'f', 0.35); await sleep(150);
+    check('Meine Seite: Fader dort bedienbar (geht ans Pult)', Math.abs(__ctl.mock.store.get('/ch/01/mix/fader') - 0.35) < 0.001 && Math.abs(parseFloat(stripUI['ch01'].fader.value) - 0.35) < 0.001);
+    UserPage.move('bus03', -1); await sleep(400);
+    check('Meine Seite: Reihenfolge ändern baut die Seite neu auf (ch03, bus03, ch01)', Object.keys(stripUI).join() === 'ch03,bus03,ch01');
+    check('Meine Seite: Auswahl und letzte Ebene sind gespeichert', JSON.parse(localStorage.getItem('x32.userpage')).join() === 'ch03,bus03,ch01' && localStorage.getItem('x32-layer') === 'user');
+    app.querySelector('.user-head button').click(); await sleep(150);
+    const ed = document.getElementById('userpage-editor');
+    check('Meine Seite bearbeiten: Fenster mit Auswahlliste aller Ebenen und den drei gewählten rechts', !!ed && ed.querySelectorAll('.up-avail .up-item').length >= 70 && ed.querySelectorAll('.up-mine .up-row').length === 3 && ed.querySelectorAll('.up-avail .up-item.on').length === 3, ed && ed.querySelectorAll('.up-avail .up-item').length);
+    Array.from(ed.querySelectorAll('.up-avail .up-item')).find((b) => /Ch 02/.test(b.textContent)).click(); await sleep(400);
+    check('Meine Seite bearbeiten: Klick in der Liste fügt hinzu (Kick Out), Seite dahinter aktualisiert sich', UserPage.ids().join() === 'ch03,bus03,ch01,ch02' && ed.querySelectorAll('.up-mine .up-row').length === 4 && !!stripUI['ch02']);
+    ed.querySelector('.up-search').value = 'Snare'; ed.querySelector('.up-search').dispatchEvent(new Event('input'));
+    check('Meine Seite bearbeiten: Suche "Snare" zeigt nur Snare-Kanäle', ed.querySelectorAll('.up-avail .up-item').length === 2 && /Snare/.test(ed.querySelector('.up-avail').textContent), ed.querySelectorAll('.up-avail .up-item').length);
+    ed.querySelector('.up-search').value = ''; ed.querySelector('.up-search').dispatchEvent(new Event('input'));
+    ed.querySelectorAll('.up-mine .up-row')[3].querySelector('.up-mv[data-d="-1"]').click(); await sleep(400);
+    check('Meine Seite bearbeiten: ▲ schiebt nach vorn', UserPage.ids().join() === 'ch03,bus03,ch02,ch01');
+    ed.querySelectorAll('.up-mine .up-row')[0].querySelector('.up-rm').click(); await sleep(400);
+    check('Meine Seite bearbeiten: ✕ entfernt (Kanal 3 weg)', UserPage.ids().join() === 'bus03,ch02,ch01' && !stripUI['ch03']);
+    stripUI['bus03'].pinEl.click(); await sleep(400);
+    check('Meine Seite: Stern (★) auf der Seite entfernt den Kanalzug wieder', UserPage.ids().join() === 'ch02,ch01' && !stripUI['bus03']);
+    ed.querySelector('.up-clear').click(); await sleep(400);
+    check('Meine Seite bearbeiten: "Alle entfernen" leert die Seite', UserPage.ids().length === 0 && /Noch leer/.test(app.textContent));
+    UserPage.closeEditor();
+    check('Meine Seite: Fenster schließt', !document.getElementById('userpage-editor'));
+    setLayer('ch'); await sleep(300);
+
+    // Design: Schlicht (Standard) und Klassisch umschaltbar, Wahl wird gemerkt
     const acc = () => getComputedStyle(document.body).getPropertyValue('--accent').trim().toUpperCase();
-    check('Design: Standard ist "Studio" (Bernstein), Knopf zeigt es an', document.body.classList.contains('studio') && acc() === '#FFB13B' && /Studio/.test(document.getElementById('design-btn').textContent), acc());
+    check('Design: Standard ist "Schlicht" (ruhiges Blau, Systemschrift), Knopf zeigt es an', document.body.classList.contains('plain') && acc() === '#0A84FF' && /Schlicht/.test(document.getElementById('design-btn').textContent) && /apple-system/i.test(getComputedStyle(document.body).getPropertyValue('--font-body')), acc());
     document.getElementById('design-btn').click(); await sleep(100);
-    check('Design: Klick wechselt zu "Klassisch" (Türkis), gemerkt', !document.body.classList.contains('studio') && acc() === '#3DC7E8' && /Klassisch/.test(document.getElementById('design-btn').textContent) && localStorage.getItem('x32-design') === 'classic', acc());
+    check('Design: Klick wechselt zu "Klassisch" (Türkis), gemerkt', !document.body.classList.contains('plain') && acc() === '#3DC7E8' && /Klassisch/.test(document.getElementById('design-btn').textContent) && localStorage.getItem('x32-design') === 'classic', acc());
     document.getElementById('design-btn').click(); await sleep(100);
-    check('Design: zurück zu "Studio"', document.body.classList.contains('studio') && acc() === '#FFB13B' && localStorage.getItem('x32-design') === 'studio');
+    check('Design: zurück zu "Schlicht"', document.body.classList.contains('plain') && acc() === '#0A84FF' && localStorage.getItem('x32-design') === 'plain');
 
     // Offline-Modus (ohne Pult arbeiten, später übertragen)
     try { localStorage.removeItem('x32.offline'); } catch(e){}
@@ -438,6 +523,7 @@ window.__mockInit = (mock) => {
 
   // ---- Ansichten für Screenshots ----
   if(view === 'offlinemode'){ document.getElementById('connect-btn').click(); await waitFor(() => X.status().state === 'idle', 3000); await enterOffline(); X.setWire('/ch/01/mix/fader', 'f', 0.62); X.setWire('/ch/03/mix/on', 'i', 0); await sleep(700); }
+  if(view === 'user'){ ['ch02', 'ch01', 'bus03', 'ch06', 'st'].forEach((i) => { if(i !== 'st') UserPage.add(i); }); setLayer('user'); await sleep(1500); }
   if(view === 'tools') showView('tools');
   if(view === 'scenes'){ try { localStorage.removeItem('x32.scenes'); } catch(e){} Scenes.saveScene('Soundcheck', true); X.setWire('/ch/01/mix/fader', 'f', 0.3); Scenes.saveScene('Band A – Bühne', false); Scenes.open(); }
   if(view === 'clip'){ const m1 = STRIP_BY_ID['ch01'].meter, f = new Float32Array(70); f[m1.idx[0]] = 1.0; __ctl.emitMeter(m1.stream, f); f[m1.idx[0]] = 0.35; __ctl.emitMeter(m1.stream, f); }

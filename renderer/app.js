@@ -141,13 +141,25 @@ statusBadge.addEventListener('click', showDiagnostics);
 function wantAll(){
   X.setSubs(X32V.subscriptionSpecs(currentLayer));
   X.want(dockStrips.flatMap((s) => X32V.basicPaths(s)));
-  const order = X32V.LAYERS.map((l) => l.id).sort((a, b) => (a === currentLayer ? -1 : b === currentLayer ? 1 : 0));
+  X.want(layerPaths(currentLayer));                    // erst die sichtbare Ebene, dann ihre Mini-Anzeigen (EQ/Kompressor), dann der Rest
+  X.want(layerMiniPaths(currentLayer));
+  const order = X32V.LAYERS.map((l) => l.id).filter((id) => id !== currentLayer);
   order.forEach((id) => X.want(layerPaths(id)));
 }
 const DOCK_IDS = ['st', 'mono'];
-function layerStrips(id){ return STRIPS.filter((s) => s.layer === id && !DOCK_IDS.includes(s.id)); }
+function layerStrips(id){
+  if(id === 'user') return UserPage.ids().map((sid) => STRIP_BY_ID[sid]);      // Meine Seite: eigene Auswahl in eigener Reihenfolge
+  return STRIPS.filter((s) => s.layer === id && !DOCK_IDS.includes(s.id));
+}
 const dockStrips = STRIPS.filter((s) => DOCK_IDS.includes(s.id));
 function layerPaths(id){ return layerStrips(id).flatMap((s) => X32V.basicPaths(s)); }
+// Werte für die Mini-Anzeigen (EQ, Kompressor) der sichtbaren Kanalzüge samt Main/Mono
+function layerMiniPaths(id){ return layerStrips(id).concat(dockStrips).flatMap((s) => Minis.paths(s)); }
+// Meter-Ströme: Kanäle und Main immer; Strom 1 (Gain Reduction der Kanäle) nur, wenn Kanäle sichtbar sind
+function applyMeterStreams(){
+  const needs1 = layerStrips(currentLayer).concat(dockStrips).some((s) => s.gr && s.gr.stream === '1');
+  X.setMeters(needs1 ? ['0', '1', '2'] : ['0', '2']);
+}
 
 // Offline-Modus: ohne Pult arbeiten (Startwerte, Änderungen bleiben in der App, später aufs Pult übertragbar)
 async function enterOffline(){
@@ -268,6 +280,13 @@ function buildStrip(strip){
   plate.appendChild(icon);
   plate.appendChild(name);
   wrap.appendChild(plate);
+  const mini = Minis.attach(ui);                     // EQ, Kompressor, Pegel über dem Fader
+  if(mini) wrap.appendChild(mini);
+  const pin = el('<button class="pin-btn" aria-label="Meine Seite"></button>');
+  pin.addEventListener('click', (e) => { e.stopPropagation(); UserPage.toggle(strip.id); });
+  wrap.appendChild(pin);
+  ui.pinEl = pin;
+  setPin(ui);
 
   const row = el('<div class="meter-fader-row"></div>');
   const nMeters = strip.meter ? strip.meter.idx.length : 0;
@@ -310,6 +329,19 @@ function buildStrip(strip){
   return ui;
 }
 
+// Stern am Kanalzug: gehört der Zug zu "Meine Seite"?
+function setPin(ui){
+  const on = UserPage.has(ui.strip.id);
+  ui.pinEl.classList.toggle('on', on);
+  ui.pinEl.textContent = on ? '★' : '☆';
+  ui.pinEl.title = on ? 'Von „Meine Seite“ entfernen' : 'Zu „Meine Seite“ hinzufügen';
+}
+UserPage.onChange(() => {
+  Object.values(stripUI).concat(Object.values(dockUI)).forEach(setPin);
+  if(currentLayer === 'user') setLayer('user');       // Reihenfolge/Auswahl geändert: Seite neu aufbauen
+  if(X.isLive()) X.want(layerMiniPaths(currentLayer));
+});
+
 function paintStrip(ui){
   const s = ui.strip, b = s.base;
   const nameV = X.get(b + '/config/name');
@@ -345,6 +377,13 @@ function showView(view){
   if(view === 'tools'){ if(typeof closeDetail === 'function') closeDetail(); Tools.init(document.getElementById('tools')); }
 }
 
+// Änderungen eines Kanalzugs: Name/Fader/Mute sofort, EQ/Kompressor gebündelt für die Mini-Anzeige
+function watchStrip(ui, paths){
+  const s = ui.strip;
+  if(paths.some((p) => !Minis.isMiniPath(p))) paintStrip(ui);
+  if(paths.some(Minis.isMiniPath)) Minis.schedule(ui);
+}
+
 function setLayer(id){
   currentLayer = id;
   if(currentView === 'console') layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === id));
@@ -357,14 +396,27 @@ function setLayer(id){
     stripUI[strip.id] = ui;
     row.appendChild(ui.wrap);
     paintStrip(ui);
-    unsubscribers.push(X.subscribe(strip.base + '/', () => paintStrip(ui)));
+    unsubscribers.push(X.subscribe(strip.base + '/', (ps) => watchStrip(ui, ps)));
   });
   app.innerHTML = '';
+  if(id === 'user'){
+    const head = el('<div class="user-head"><span>Meine Seite – die Kanalzüge, die du wirklich brauchst. Stern an jedem Kanalzug oder „Bearbeiten“.</span><button class="btn secondary small">Bearbeiten</button></div>');
+    head.querySelector('button').addEventListener('click', () => UserPage.openEditor());
+    app.appendChild(head);
+    if(!row.children.length) app.appendChild(el('<div class="user-empty">Noch leer. Tippe bei einem Kanalzug auf den Stern (☆) oder auf „Bearbeiten“, um ihn hierher zu holen.</div>'));
+  }
   app.appendChild(row);
-  if(X.isLive()) X.want(layerPaths(id).concat(dockStrips.flatMap((s) => X32V.basicPaths(s))));
+  try { localStorage.setItem('x32-layer', id); } catch(e){}
+  if(X.isLive()){
+    X.want(layerPaths(id).concat(dockStrips.flatMap((s) => X32V.basicPaths(s))));
+    X.want(layerMiniPaths(id));
+  }
+  applyMeterStreams();
   X.setSubs(X32V.subscriptionSpecs(id));
   updateHot();
+  repaintMinis();
 }
+function repaintMinis(){ Object.values(stripUI).forEach((ui) => Minis.schedule(ui)); }
 
 // Werte, die regelmäßig nachgelesen werden: Fader/Mute der sichtbaren Ebene
 function updateHot(){
@@ -380,7 +432,8 @@ function buildDock(){
     dockUI[strip.id] = ui;
     row.appendChild(ui.wrap);
     paintStrip(ui);
-    X.subscribe(strip.base + '/', () => paintStrip(ui));
+    X.subscribe(strip.base + '/', (ps) => watchStrip(ui, ps));
+    Minis.schedule(ui);
   });
   dock.appendChild(row);
 }
@@ -391,6 +444,9 @@ function buildLayerTabs(){
     b.addEventListener('click', () => { setLayer(l.id); if(currentView !== 'console') showView('console'); });
     layerTabs.appendChild(b);
   });
+  const up = el('<button class="layer-tab" data-layer="user">★ Meine Seite</button>');
+  up.addEventListener('click', () => { setLayer('user'); if(currentView !== 'console') showView('console'); });
+  layerTabs.appendChild(up);
   const sc = el('<button class="layer-tab right-group" data-layer="scenes">Szenen</button>');
   sc.addEventListener('click', () => Scenes.open());
   layerTabs.appendChild(sc);
@@ -420,9 +476,15 @@ X.onMeter((id, floats) => {
   const now = performance.now();
   for(const s of STRIPS){
     const m = s.meter;
+    const ui = stripUI[s.id] || dockUI[s.id];
+    if(s.gr && s.gr.stream === id && s.gr.idx[0] < floats.length){         // Gain Reduction des Kompressors
+      const gr = grFromFactor(floats[s.gr.idx[0]]);
+      const st0 = METER_STATE[s.id] || (METER_STATE[s.id] = { peaks: m ? m.idx.map(() => ({ v: 0, t: 0 })) : [], last: m ? m.idx.map(() => 0) : [], level: 0 });
+      st0.gr = gr;
+      if(ui) Minis.setGr(ui, gr);
+    }
     if(!m || m.stream !== id) continue;
     const st = METER_STATE[s.id] || (METER_STATE[s.id] = { peaks: m.idx.map(() => ({ v: 0, t: 0 })), last: m.idx.map(() => 0), level: 0 });
-    const ui = stripUI[s.id] || dockUI[s.id];
     let level = 0;
     m.idx.forEach((idx, i) => {
       if(idx >= floats.length) return;
@@ -439,6 +501,7 @@ X.onMeter((id, floats) => {
       }
     });
     st.level = level;
+    if(ui) Minis.setPeak(ui, Math.max(...st.peaks.map((p) => p.v)));
   }
   if(typeof processingMeters === 'function') processingMeters(id, floats);
 });
@@ -465,16 +528,17 @@ window.x32API.onUpdateError((msg) => {
 });
 window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; if(!window.__noAutoConnect) maybeShowChangelog(v); });
 
-// ---------- Design: Studio (neu) oder Klassisch ----------
+// ---------- Design: Schlicht (Standard) oder Klassisch ----------
 const designBtn = document.getElementById('design-btn');
 function applyDesign(d){
-  document.body.classList.toggle('studio', d === 'studio');
-  designBtn.textContent = d === 'studio' ? 'Design: Studio' : 'Design: Klassisch';
+  document.body.classList.toggle('plain', d === 'plain');
+  designBtn.textContent = d === 'plain' ? 'Design: Schlicht' : 'Design: Klassisch';
   try { localStorage.setItem('x32-design', d); } catch(e){}
   if(typeof Measure !== 'undefined') Measure.redraw();
+  if(typeof Minis !== 'undefined') Minis.redrawAll();
 }
-designBtn.addEventListener('click', () => applyDesign(document.body.classList.contains('studio') ? 'classic' : 'studio'));
-try { applyDesign(localStorage.getItem('x32-design') === 'classic' ? 'classic' : 'studio'); } catch(e){}
+designBtn.addEventListener('click', () => applyDesign(document.body.classList.contains('plain') ? 'classic' : 'plain'));
+try { applyDesign(localStorage.getItem('x32-design') === 'classic' ? 'classic' : 'plain'); } catch(e){}
 
 // ================= Start =================
 const rewBtn = document.getElementById('rew-btn');
@@ -483,6 +547,7 @@ buildLayerTabs();
 buildDock();
 Overview.init();
 Measure.show();
-setLayer('ch');
+{ let last = 'ch'; try { last = localStorage.getItem('x32-layer') || 'ch'; } catch(e){}
+  setLayer(last === 'user' || X32V.LAYERS.some((l) => l.id === last) ? last : 'ch'); }
 if(!window.__noAutoConnect) setTimeout(autoConnect, 300);
 X.loadSnapshot().then(() => { STRIPS.forEach((s) => { if(stripUI[s.id]) paintStrip(stripUI[s.id]); }); });
