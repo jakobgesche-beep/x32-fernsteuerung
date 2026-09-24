@@ -224,7 +224,7 @@ Startwert abweichen) oder Verwerfen.
 
 ## App-Icon
 
-Quelle `build/icon.svg` (drei Fader auf dunklem Grund, ein Knopf blau). `build/icon.png` (1024 px, mit transparenten Ecken) und
+Quelle `build/icon.svg` (Beschriftungsschild "X32" mit rotem Farbbalken auf dunklem Grund, wie ein Kanalstreifen am Pult). `build/icon.png` (1024 px, mit transparenten Ecken) und
 `build/icon.icns` entstehen daraus (Chrome headless -> `sips` -> `iconutil`); electron-builder nimmt `build/icon.icns`
 (`mac.icon` in package.json). Dasselbe Zeichen steht klein in der Kopfzeile der App.
 
