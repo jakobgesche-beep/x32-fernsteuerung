@@ -287,6 +287,34 @@ window.__mockInit = (mock) => {
     check('Meter: Klick auf die Lampe setzt sie zurück', !c1.clipEl.classList.contains('on') && !c1.clipped);
     check('Meter: Kanalzüge ohne Meter (DCA) haben keine Lampe', !STRIP_BY_ID['dca1'].meter);
 
+    // Szenen: speichern, verändern, laden, rückgängig
+    try { localStorage.removeItem('x32.scenes'); localStorage.removeItem('x32.scenes.backup'); } catch(e){}
+    const st = __ctl.mock.store;
+    document.querySelector('.layer-tab[data-layer="scenes"]').click(); await sleep(150);
+    check('Szenen: Fenster öffnet sich, noch leer', !!document.getElementById('scenes-overlay') && /Noch keine Szenen/.test(document.getElementById('scenes-overlay').textContent));
+    X.setWire('/ch/01/mix/fader', 'f', 0.5); X.setWire('/ch/03/mix/on', 'i', 0); X.setWire('/bus/02/mix/fader', 'f', 0.6); await sleep(300);
+    const ov = document.getElementById('scenes-overlay');
+    ov.querySelector('.scene-name').value = 'Soundcheck'; ov.querySelector('.scene-labels').checked = true;
+    ov.querySelector('.scene-save-btn').click(); await sleep(100);
+    check('Szenen: gespeichert und in der Liste mit Name und Anzahl', /Soundcheck/.test(ov.textContent) && /Kanalzüge · mit Beschriftung/.test(ov.textContent), ov.querySelector('.scene-meta') && ov.querySelector('.scene-meta').textContent);
+    const saved = Scenes.list()[0];
+    check('Szenen: Stand enthält Fader, Mute und Namen', saved.data.ch01.f === 0.5 && saved.data.ch03.on === 0 && saved.data.bus02.f === 0.6 && typeof saved.data.ch02.n === 'string' && saved.count > 60, JSON.stringify({ f: saved.data.ch01, count: saved.count }));
+    X.setWire('/ch/01/mix/fader', 'f', 0.9); X.setWire('/ch/03/mix/on', 'i', 1); X.setWire('/ch/02/config/name', 's', 'Anders'); await sleep(300);
+    ov.querySelector('.scene-actions .btn').click(); await sleep(100);
+    check('Szenen: "Laden" fragt vorher nach und nennt die Zahl der Änderungen', /Werte am Pult ändern/.test(ov.querySelector('.scene-actions').textContent) && /3 Werte/.test(ov.querySelector('.scene-actions').textContent), ov.querySelector('.scene-actions').textContent);
+    ov.querySelector('.scene-actions .btn').click();       // "Ja, laden"
+    await waitFor(() => st.get('/ch/01/mix/fader') === 0.5 && st.get('/ch/03/mix/on') === 0 && st.get('/ch/02/config/name') === 'Kick Out', 4000);
+    check('Szenen: Laden stellt Fader, Mute und Namen am (simulierten) Pult wieder her', Math.abs(st.get('/ch/01/mix/fader') - 0.5) < 0.01 && st.get('/ch/03/mix/on') === 0 && st.get('/ch/02/config/name') === 'Kick Out', st.get('/ch/01/mix/fader') + ' / ' + st.get('/ch/03/mix/on') + ' / ' + st.get('/ch/02/config/name'));
+    check('Szenen: Anzeige in der App folgt', stripUI['ch01'] && Math.abs(parseFloat(stripUI['ch01'].fader.value) - 0.5) < 0.01);
+    check('Szenen: "Rückgängig" wird angeboten', /Rückgängig/.test(ov.textContent) && !!Scenes.list().length);
+    await sleep(100); Array.from(ov.querySelectorAll('.scene-undo button')).forEach((b) => b.click());
+    await waitFor(() => Math.abs(st.get('/ch/01/mix/fader') - 0.9) < 0.01 && st.get('/ch/03/mix/on') === 1, 4000);
+    check('Szenen: Rückgängig bringt den Stand vor dem Laden zurück', Math.abs(st.get('/ch/01/mix/fader') - 0.9) < 0.01 && st.get('/ch/03/mix/on') === 1 && st.get('/ch/02/config/name') === 'Anders', st.get('/ch/01/mix/fader') + ' / ' + st.get('/ch/03/mix/on') + ' / ' + st.get('/ch/02/config/name'));
+    Scenes.render(); const delBtn = Array.from(ov.querySelectorAll('.scene-actions .btn')).find((b) => /Löschen/.test(b.textContent)); delBtn.click(); await sleep(50);
+    Array.from(ov.querySelectorAll('.scene-actions .btn')).find((b) => /Ja, löschen/.test(b.textContent)).click(); await sleep(100);
+    check('Szenen: Löschen (mit Rückfrage) entfernt die Szene', Scenes.list().length === 0);
+    Scenes.close(); check('Szenen: Fenster schließt', !document.getElementById('scenes-overlay'));
+
     // "Neu in dieser Version"
     try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
     maybeShowChangelog('2.5.0');

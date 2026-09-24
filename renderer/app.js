@@ -362,6 +362,9 @@ function buildLayerTabs(){
     b.addEventListener('click', () => { setLayer(l.id); if(currentView !== 'console') showView('console'); });
     layerTabs.appendChild(b);
   });
+  const sc = el('<button class="layer-tab right-group" data-layer="scenes">Szenen</button>');
+  sc.addEventListener('click', () => Scenes.open());
+  layerTabs.appendChild(sc);
   const m = el('<button class="layer-tab measure-tab" data-layer="measure">Messung</button>');
   m.addEventListener('click', () => showView('measure'));
   layerTabs.appendChild(m);
