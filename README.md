@@ -63,6 +63,10 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
     und Ratio-Punkt ziehbar, Knee 0–5, Comp/Exp, Live-Punkt), senkrechte
     Balken mit Live-Gain-Reduction, Gain Envelope (Attack/Hold/Release,
     Lin/Log, Peak/RMS, Auto Time), Side-Chain-Filter
+- **Kanal bearbeiten** (Reiter "Kanal" in der Ansicht, gilt für alle Zeilen
+  inkl. DCA): Name (12 Zeichen, Umlaute werden ersetzt), Farbe (16 Varianten
+  inkl. "invers") und Icon (alle 74, mit Suche); Änderungen gehen sofort zum
+  Pult und sind live auf dem Streifen sichtbar
 - Änderungen am Pult (Fader, Mute, EQ, Kompressor, Namen, Icons) erscheinen
   live in der App
 - "Pult suchen": durchsucht das aktuelle WLAN nach X32/M32-Konsolen und zeigt

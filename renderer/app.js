@@ -201,8 +201,8 @@ function buildStrip(strip){
     const on = X.get(onPath);
     X.setWire(onPath, 'i', on === 0 ? 1 : 0);
   });
-  if(strip.eqBands) plate.addEventListener('click', () => openDetail(strip));
-  else plate.classList.add('plain');
+  plate.addEventListener('click', () => openDetail(strip));
+  plate.title = 'Klicken: EQ, Kompressor, Name, Farbe und Icon bearbeiten';
 
   Object.assign(ui, { wrap, icon, name, fader, dbLabel, muteBtn, faderPath, onPath });
   return ui;

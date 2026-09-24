@@ -137,7 +137,7 @@
       if (w && !w.verifying) return;          // veraltetes Echo während wir noch schreiben
       if (w && w.verifying) {
         // Kontroll-Lesen: stimmt der Wert am Pult nicht (Paket verloren), einmal erneut senden
-        const lost = w.type === "f" ? Math.abs(v - w.value) > LOST_TOLERANCE : v !== w.value;
+        const lost = w.type === "f" ? Math.abs(v - w.value) > LOST_TOLERANCE : w.type === "s" ? String(v).trimEnd() !== String(w.value).trimEnd() : v !== w.value;
         if (lost && w.retries < 2) {
           w.retries++; w.verifying = false; w.dirty = true; w.lastWrite = this.now();
           this.stats.resends++;

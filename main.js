@@ -101,7 +101,8 @@ ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }
 ipcMain.handle("x32-snapshot", async () => (client ? client.snapshot() : []));
 // Häufige, schnelle Aufrufe ohne Antwort (ipcRenderer.send), damit die Übertragung so kurz wie möglich bleibt
 ipcMain.on("x32-set", (event, oscPath, type, value) => {
-  if (client && validPath(oscPath) && ["f", "i", "s"].includes(type)) client.set(oscPath, type, value);
+  const okValue = type === "s" ? typeof value === "string" && value.length <= 24 : typeof value === "number" && Number.isFinite(value);
+  if (client && validPath(oscPath) && ["f", "i", "s"].includes(type) && okValue) client.set(oscPath, type, value);
 });
 ipcMain.on("x32-want", (event, paths) => { if (client && validPaths(paths)) client.want(paths); });
 ipcMain.on("x32-hot", (event, paths) => { if (client && validPaths(paths)) client.setHot(paths); });

@@ -472,7 +472,7 @@ function drawEq(){
 }
 
 function refreshEq(){
-  if(!proc) return;
+  if(!proc || !proc.els.eq) return;
   const e = proc.els.eq, m = proc.misc;
   const active = (n) => document.activeElement === n;
   e.eqBtn.classList.toggle('on', m.eqOn !== 0);
@@ -712,7 +712,7 @@ function buildDynPage(){
 }
 
 function refreshDyn(){
-  if(!proc) return;
+  if(!proc || !proc.els.dyn) return;
   const d = proc.dyn, e = proc.els.dyn;
   e.active.classList.toggle('on', d.on !== 0);
   if(d.thr !== undefined) e.thr.set(d.thr);
@@ -737,17 +737,104 @@ function refreshDyn(){
 }
 
 // ---------- Gerüst: Overlay, Tabs, Meter ----------
+// ---------- Kanal-Seite: Name, Farbe, Icon ----------
+const COLOR_NAMES = ['Aus', 'Rot', 'Grün', 'Gelb', 'Blau', 'Magenta', 'Cyan', 'Weiß'];
+const UMLAUTS = { 'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'Ä': 'Ae', 'Ö': 'Oe', 'Ü': 'Ue', 'ß': 'ss' };
+// Das Pult zeigt nur einfache Zeichen und höchstens 12 Stück
+function cleanName(text){
+  return text.replace(/[äöüÄÖÜß]/g, (c) => UMLAUTS[c]).replace(/[^\x20-\x7E]/g, '').slice(0, 12);
+}
+
+function buildCfgPage(){
+  const s = proc.strip, b = s.base;
+  const page = el('<div class="cfg-page"></div>');
+
+  const nameBlock = el('<div class="cfg-block"><div class="section-title">Name</div></div>');
+  const nameInput = el('<input type="text" class="cfg-name" maxlength="12" spellcheck="false" autocomplete="off" placeholder="' + esc(s.label) + '">');
+  nameInput.addEventListener('input', () => {
+    const cleaned = cleanName(nameInput.value);
+    if(cleaned !== nameInput.value) nameInput.value = cleaned;
+    X.set(b + '/config/name', cleaned);
+  });
+  nameInput.addEventListener('keydown', (e) => { if(e.key === 'Enter') nameInput.blur(); });
+  nameBlock.appendChild(nameInput);
+  nameBlock.appendChild(el('<p class="hint" style="text-align:left;">Bis 12 Zeichen. Das Pult zeigt nur einfache Zeichen, Umlaute werden ersetzt (ä → ae, ö → oe, ü → ue, ß → ss). Leer lassen zeigt den Standardnamen.</p>'));
+  page.appendChild(nameBlock);
+
+  const colorBlock = el('<div class="cfg-block"><div class="section-title">Farbe</div></div>');
+  const swatches = el('<div class="swatches"></div>');
+  const colorBtns = [];
+  for(let v = 0; v < 16; v++){
+    const c = chColor(v);
+    const label = COLOR_NAMES[v % 8] + (v >= 8 ? ' (invers)' : '');
+    const btn = el('<button class="swatch' + (v >= 8 ? ' inv' : '') + (v % 8 === 0 ? ' none' : '') + '" title="' + esc(label) + '" style="' + (v % 8 === 0 ? '' : (v >= 8 ? 'border-color:' + c.border + ';color:' + c.fg : 'background:' + c.bg + ';border-color:' + c.border)) + '"></button>');
+    btn.addEventListener('click', () => X.set(b + '/config/color', v));
+    swatches.appendChild(btn);
+    colorBtns.push(btn);
+  }
+  colorBlock.appendChild(swatches);
+  colorBlock.appendChild(el('<p class="hint" style="text-align:left;">Obere Reihe: gefüllt, untere Reihe: nur Umrandung (wie am Pult "invers").</p>'));
+  page.appendChild(colorBlock);
+
+  const iconBlock = el('<div class="cfg-block"><div class="section-title">Icon</div></div>');
+  const filter = el('<input type="text" class="cfg-filter" placeholder="Icon suchen (z. B. Snare, Vocal, Guitar)" spellcheck="false" autocomplete="off">');
+  iconBlock.appendChild(filter);
+  const grid = el('<div class="icon-grid"></div>');
+  const iconBtns = [];
+  for(let id = 1; id <= 74; id++){
+    const name = id === 1 ? 'Kein Icon' : V.ICON_NAMES[id];
+    const btn = el('<button class="icon-btn" title="' + esc(name) + '" data-name="' + esc(name.toLowerCase()) + '">' + (id === 1 ? '<span class="icon-none">–</span>' : X32Icons.svg(id, 28)) + '</button>');
+    btn.addEventListener('click', () => X.set(b + '/config/icon', id));
+    grid.appendChild(btn);
+    iconBtns.push(btn);
+  }
+  filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    iconBtns.forEach((btn) => { btn.hidden = q !== '' && !btn.dataset.name.includes(q); });
+  });
+  iconBlock.appendChild(grid);
+  page.appendChild(iconBlock);
+
+  return { page, nameInput, colorBtns, iconBtns };
+}
+
+function refreshCfg(){
+  if(!proc || !proc.els.cfg) return;
+  const b = proc.strip.base, e = proc.els.cfg;
+  const name = X.get(b + '/config/name');
+  if(name !== undefined && document.activeElement !== e.nameInput) e.nameInput.value = name;
+  const color = X.get(b + '/config/color') || 0;
+  e.colorBtns.forEach((btn, v) => btn.classList.toggle('on', v === color));
+  const icon = X.get(b + '/config/icon') || 1;
+  e.iconBtns.forEach((btn, i) => btn.classList.toggle('on', i + 1 === icon));
+}
+
+// Namensschild oben in der Ansicht (zeigt Änderungen sofort)
+function renderChip(){
+  const strip = proc.strip;
+  const c = chColor(X.get(strip.base + '/config/color'));
+  const nameV = X.get(strip.base + '/config/name');
+  const iconId = X.get(strip.base + '/config/icon');
+  const chip = proc.els.chip;
+  chip.style.background = c.bg; chip.style.color = c.fg; chip.style.borderColor = c.border;
+  chip.innerHTML = '<div class="chip-icon">' + (iconId && iconId !== 1 ? X32Icons.svg(iconId, 26) : '') + '</div><b>' + esc(nameV || strip.label) + '</b><span>' + esc(strip.label) + '</span>';
+}
+
 function redrawAll(){
   if(!proc) return;
-  if(proc.tab === 'eq') drawEq(); else { drawTransfer(); drawEnvelope(); drawFilter(); }
+  if(proc.tab === 'eq') drawEq();
+  else if(proc.tab === 'dyn'){ drawTransfer(); drawEnvelope(); drawFilter(); }
 }
 
 function setTab(tab){
   proc.tab = tab;
-  proc.els.eq.page.hidden = tab !== 'eq';
-  proc.els.dyn.page.hidden = tab !== 'dyn';
-  proc.els.tabEq.classList.toggle('on', tab === 'eq');
-  proc.els.tabDyn.classList.toggle('on', tab === 'dyn');
+  const e = proc.els;
+  if(e.eq) e.eq.page.hidden = tab !== 'eq';
+  if(e.dyn) e.dyn.page.hidden = tab !== 'dyn';
+  e.cfg.page.hidden = tab !== 'cfg';
+  e.tabEq.classList.toggle('on', tab === 'eq');
+  e.tabDyn.classList.toggle('on', tab === 'dyn');
+  e.tabCfg.classList.toggle('on', tab === 'cfg');
   requestAnimationFrame(redrawAll);
 }
 
@@ -757,12 +844,13 @@ function processingMeters(id, floats){
   const s = proc.strip;
   if(s.meter && s.meter.stream === id){
     let v = 0;
+    if(!proc.els.inFill) return;
     s.meter.idx.forEach((k) => { if(k < floats.length) v = Math.max(v, floats[k]); });
     proc.inDb = v > 0.0001 ? 20 * Math.log10(v) : -90;
     proc.els.inFill.style.height = (100 - levelToPct(v)).toFixed(0) + '%';
   }
   if(s.gr && s.gr.stream === id && s.gr.idx[0] < floats.length) proc.gr = grFromFactor(floats[s.gr.idx[0]]);
-  if(proc.tab === 'dyn' && !procFrame){
+  if(proc.tab === 'dyn' && proc.els.dyn && !procFrame){
     procFrame = requestAnimationFrame(() => {
       procFrame = null;
       if(!proc) return;
@@ -782,14 +870,17 @@ function openDetail(strip){
   const c = chColor(X.get(strip.base + '/config/color'));
   const nameV = X.get(strip.base + '/config/name');
   const iconId = X.get(strip.base + '/config/icon');
-  const chip = el('<div class="proc-chip" style="background:' + c.bg + ';color:' + c.fg + ';border-color:' + c.border + '"><div class="chip-icon">' + (iconId ? X32Icons.svg(iconId, 26) : '') + '</div><b>' + esc(nameV || strip.label) + '</b><span>' + esc(strip.label) + '</span></div>');
+  const chip = el('<div class="proc-chip"></div>');
   const tabs = el('<div class="proc-tabs"></div>');
   const tabEq = el('<button class="proc-tab">EQ</button>');
   const tabDyn = el('<button class="proc-tab">Kompressor</button>');
+  const tabCfg = el('<button class="proc-tab">Kanal</button>');
   tabEq.addEventListener('click', () => setTab('eq'));
   tabDyn.addEventListener('click', () => setTab('dyn'));
-  tabs.appendChild(tabEq);
+  tabCfg.addEventListener('click', () => setTab('cfg'));
+  if(strip.eqBands) tabs.appendChild(tabEq);
   if(strip.dyn) tabs.appendChild(tabDyn);
+  tabs.appendChild(tabCfg);
   const closeBtn = el('<button class="close-btn">&times;</button>');
   closeBtn.addEventListener('click', closeDetail);
   head.appendChild(chip); head.appendChild(tabs); head.appendChild(closeBtn);
@@ -803,19 +894,19 @@ function openDetail(strip){
   side.appendChild(inTrack);
   side.appendChild(el('<div class="mini-label">In</div>'));
   const main = el('<div class="proc-main"></div>');
-  const eqPage = buildEqPage();
-  const dynPage = buildDynPage();
-  main.appendChild(eqPage.page);
-  main.appendChild(dynPage.page);
-  body.appendChild(side);
+  const eqPage = strip.eqBands ? buildEqPage() : null;
+  const dynPage = strip.eqBands ? buildDynPage() : null;
+  const cfgPage = buildCfgPage();
+  if(eqPage) main.appendChild(eqPage.page);
+  if(dynPage) main.appendChild(dynPage.page);
+  main.appendChild(cfgPage.page);
+  if(strip.meter) body.appendChild(side);
   body.appendChild(main);
   card.appendChild(body);
   overlay.appendChild(card);
 
   proc.overlay = overlay;
-  proc.els = { eq: eqPage, dyn: dynPage, inFill, tabEq, tabDyn };
-  eqPage.page.hidden = false;
-  dynPage.page.hidden = true;
+  proc.els = { eq: eqPage, dyn: dynPage, cfg: cfgPage, chip, inFill, tabEq, tabDyn, tabCfg };
 
   overlay.addEventListener('mousedown', (e) => { proc.downOnOverlay = e.target === overlay; });
   overlay.addEventListener('click', (e) => { if(e.target === overlay && proc.downOnOverlay) closeDetail(); });
@@ -832,12 +923,14 @@ function openDetail(strip){
   X.refresh(paths, true);
   X.setHotGroup('detail', paths);
   if(strip.type === 'ch') X.setMeters(['0', '1', '2']);
-  proc.unsub = X.subscribe(strip.base + '/', () => { pullFromStore(); refreshEq(); refreshDyn(); });
+  proc.unsub = X.subscribe(strip.base + '/', () => { pullFromStore(); refreshEq(); refreshDyn(); refreshCfg(); renderChip(); });
 
-  setTab('eq');
+  setTab(strip.eqBands ? 'eq' : 'cfg');
   pullFromStore();
   refreshEq();
   refreshDyn();
+  refreshCfg();
+  renderChip();
 }
 
 function closeDetail(){

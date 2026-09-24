@@ -105,7 +105,7 @@ window.__mockInit = (mock) => {
     setLayer('mtx'); await sleep(400);
     check('Matrix/Main: 8 Züge, Main LR mit 2 Pegelbalken', Object.keys(stripUI).length === 8 && stripUI['st'].fills.length === 2 && stripUI['mono'].fills.length === 1, Object.keys(stripUI).length + ' Züge');
     setLayer('dca'); await sleep(300);
-    check('DCA: 8 Züge ohne Pegelbalken, nicht anklickbar', Object.keys(stripUI).length === 8 && stripUI['dca1'].fills.length === 0 && stripUI['dca1'].name.textContent === 'Drums');
+    check('DCA: 8 Züge ohne Pegelbalken', Object.keys(stripUI).length === 8 && stripUI['dca1'].fills.length === 0 && stripUI['dca1'].name.textContent === 'Drums');
     stripUI['dca1'].fader.value = 0.4; stripUI['dca1'].fader.dispatchEvent(new Event('input', { bubbles: true }));
     await sleep(80);
     check('DCA-Fader schreibt /dca/1/fader', Math.abs((__ctl.mock.store.get('/dca/1/fader') || 0) - 0.4) < 1e-6);
@@ -142,6 +142,43 @@ window.__mockInit = (mock) => {
     await waitFor(() => proc && proc.misc.hpf !== undefined && proc.eq[3].f !== undefined, 3000);
     check('Kanal 2: 4 Bänder, Low Cut 44 Hz aktiv', proc.eq.length === 4 && proc.misc.hpOn === 1 && Math.round(proc.misc.hpf) === 44, proc.eq.length + ' Bänder, hpf ' + Math.round(proc.misc.hpf));
     closeDetail();
+    // Kanal bearbeiten: Name, Farbe, Icon
+    setLayer('ch'); await sleep(200);
+    openDetail(STRIP_BY_ID['ch01']); await sleep(150);
+    check('Kanal 1: Reiter EQ, Kompressor und Kanal vorhanden', proc.els.tabEq.parentElement && proc.els.tabDyn.parentElement && proc.els.tabCfg.parentElement);
+    setTab('cfg');
+    const cf = proc.els.cfg;
+    cf.nameInput.focus(); cf.nameInput.value = 'Bühne 1 Lead-Sänger'; cf.nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    check('Name: Umlaute ersetzt, auf 12 Zeichen gekürzt, am Pult angekommen', __ctl.mock.store.get('/ch/01/config/name') === 'Buehne 1 Lea' && cf.nameInput.value === 'Buehne 1 Lea', 'Pult: ' + __ctl.mock.store.get('/ch/01/config/name'));
+    check('Streifen im Hintergrund zeigt den neuen Namen sofort', stripUI['ch01'].name.textContent === 'Buehne 1 Lea');
+    check('Namensschild in der Ansicht aktualisiert sich', proc.els.chip.textContent.includes('Buehne 1 Lea'));
+    cf.colorBtns[4].click(); await sleep(80);
+    check('Farbe Blau (4) am Pult gesetzt und im Streifen sichtbar', __ctl.mock.store.get('/ch/01/config/color') === 4 && getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor === 'rgb(76, 124, 224)', getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor);
+    cf.colorBtns[9].click(); await sleep(80);
+    check('Farbe "invers" (9) wird als Umrandung dargestellt', __ctl.mock.store.get('/ch/01/config/color') === 9 && getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor === 'rgba(0, 0, 0, 0)');
+    cf.iconBtns[8].click(); await sleep(80);
+    check('Icon Hi-Hat (9) am Pult gesetzt', __ctl.mock.store.get('/ch/01/config/icon') === 9 && stripUI['ch01'].icon.innerHTML.includes('<svg'), 'Pult: ' + __ctl.mock.store.get('/ch/01/config/icon'));
+    check('Auswahl im Icon-Raster markiert', cf.iconBtns[8].classList.contains('on') && cf.iconBtns.filter((b) => b.classList.contains('on')).length === 1);
+    const filterEl = proc.els.cfg.page.querySelector('.cfg-filter');
+    filterEl.value = 'snare'; filterEl.dispatchEvent(new Event('input', { bubbles: true }));
+    check('Icon-Suche: "snare" zeigt 2 Icons', cf.iconBtns.filter((b) => !b.hidden).length === 2, cf.iconBtns.filter((b) => !b.hidden).length + ' sichtbar');
+    filterEl.value = ''; filterEl.dispatchEvent(new Event('input', { bubbles: true }));
+    // Name wird am Pult geändert, Feld nicht im Fokus -> Anzeige folgt
+    cf.nameInput.blur();
+    __ctl.mock.surfaceChange('/ch/01/config/name', 'VomPult');
+    const nameSeen = await waitFor(() => cf.nameInput.value === 'VomPult' && stripUI['ch01'].name.textContent === 'VomPult', 500);
+    check('Name am Pult geändert: Feld und Streifen folgen', nameSeen);
+    closeDetail();
+    // DCA: nur Kanal-Reiter
+    setLayer('dca'); await sleep(200);
+    stripUI['dca1'].wrap.querySelector('.strip-plate').click(); await sleep(150);
+    check('DCA 1: öffnet Ansicht nur mit Reiter "Kanal"', proc && proc.tab === 'cfg' && !proc.els.tabEq.parentElement && !proc.els.tabDyn.parentElement && proc.els.tabCfg.parentElement);
+    proc.els.cfg.nameInput.value = 'Schlagzeug'; proc.els.cfg.nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    check('DCA-Name wird an /dca/1/config/name gesendet', __ctl.mock.store.get('/dca/1/config/name') === 'Schlagzeug', __ctl.mock.store.get('/dca/1/config/name'));
+    closeDetail();
+
     // Aux: nur EQ, kein Kompressor-Tab
     setLayer('aux'); await sleep(200);
     openDetail(STRIP_BY_ID['aux1']); await sleep(200);
@@ -155,12 +192,13 @@ window.__mockInit = (mock) => {
   // ---- Ansichten für Screenshots ----
   if(view === 'diag'){ document.getElementById('status-badge').click(); await sleep(400); }
   if(['aux', 'bus', 'mtx', 'dca'].includes(view)) setLayer(view);
-  if(view.startsWith('eq-') || view.startsWith('dyn-')){
-    const id = { 'eq-ch2': 'ch02', 'eq-bus3': 'bus03', 'eq-main': 'st', 'dyn-bus3': 'bus03', 'dyn-ch2': 'ch02' }[view];
+  if(view.startsWith('eq-') || view.startsWith('dyn-') || view.startsWith('cfg-')){
+    const id = { 'cfg-ch1': 'ch01', 'eq-ch2': 'ch02', 'eq-bus3': 'bus03', 'eq-main': 'st', 'dyn-bus3': 'bus03', 'dyn-ch2': 'ch02' }[view];
     if(id.startsWith('bus')) setLayer('bus'); else if(id === 'st') setLayer('mtx');
     openDetail(STRIP_BY_ID[id]);
     await sleep(500);
     if(view.startsWith('dyn-')) setTab('dyn');
+    if(view === 'cfg-ch1') setTab('cfg');
   }
   await sleep(300);
 })();
