@@ -6,167 +6,19 @@ const dgram = require("dgram");
 const { execFile, spawn } = require("child_process");
 const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
-const proto = require("./x32-protocol");
+const OSC = require("./shared/osc");
+const X32Client = require("./shared/client");
 
 const X32_PORT = 10023;
 
 let mainWindow = null;
 let socket = null;
-let targetIp = null;
-let xremoteTimer = null;
-let metersTimer = null;
+let client = null;
 
-const channelState = {};
-for (let i = 1; i <= 32; i++) {
-  channelState[i] = { name: "CH " + String(i).padStart(2, "0"), fader: 0, muted: false, color: 0, eq: [{}, {}, {}, {}], dyn: {}, misc: {} };
+function toRenderer(channel, ...args) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
 }
-
-function log(msg) {
-  if (mainWindow) mainWindow.webContents.send("x32-log", msg);
-}
-
-function chAddr(ch) { return "/ch/" + String(ch).padStart(2, "0"); }
-
-const FIELD_SPECS = {
-  eq: {
-    f: { kind: "logf", min: 20, max: 20000 },
-    g: { kind: "linf", min: -15, max: 15 },
-    q: { kind: "logf", min: 10.0, max: 0.3 },
-    type: { kind: "enum" },
-  },
-  dyn: {
-    on: { kind: "enum" },
-    thr: { kind: "linf", min: -60, max: 0 },
-    ratio: { kind: "enum" },
-    mgain: { kind: "linf", min: 0, max: 24 },
-    attack: { kind: "linf", min: 0, max: 120 },
-    hold: { kind: "logf", min: 0.02, max: 2000 },
-    release: { kind: "logf", min: 5, max: 4000 },
-    knee: { kind: "linf", min: 0, max: 5 },
-    mix: { kind: "linf", min: 0, max: 100 },
-    mode: { kind: "enum" },
-    det: { kind: "enum" },
-    env: { kind: "enum" },
-    auto: { kind: "enum" },
-    keysrc: { kind: "enum" },
-    "filter/on": { kind: "enum" },
-    "filter/type": { kind: "enum" },
-    "filter/f": { kind: "logf", min: 20, max: 20000 },
-  },
-  misc: {
-    eqOn: { path: "eq/on", kind: "enum" },
-    hpOn: { path: "preamp/hpon", kind: "enum" },
-    hpSlope: { path: "preamp/hpslope", kind: "enum" },
-    hpf: { path: "preamp/hpf", kind: "logf", min: 20, max: 400 },
-  },
-};
-const MISC_BY_PATH = {};
-Object.keys(FIELD_SPECS.misc).forEach((key) => { MISC_BY_PATH[FIELD_SPECS.misc[key].path] = key; });
-function normToActual(spec, norm) {
-  if (spec.kind === "linf") return proto.linfToActual(norm, spec.min, spec.max);
-  if (spec.kind === "logf") return proto.logfToActual(norm, spec.min, spec.max);
-  return norm;
-}
-function actualToNorm(spec, actual) {
-  if (spec.kind === "linf") return proto.actualToLinf(actual, spec.min, spec.max);
-  if (spec.kind === "logf") return proto.actualToLogf(actual, spec.min, spec.max);
-  return actual;
-}
-
-function send(address, args = []) {
-  if (!socket || !targetIp) return;
-  const buf = proto.encodeMessage(address, args);
-  socket.send(buf, 0, buf.length, X32_PORT, targetIp);
-}
-
-function requestChannelBasics(ch) {
-  const base = chAddr(ch);
-  send(base + "/config/name");
-  send(base + "/config/color");
-  send(base + "/mix/fader");
-  send(base + "/mix/on");
-}
-
-function requestChannelDetail(ch) {
-  const base = chAddr(ch);
-  for (let b = 1; b <= 4; b++) {
-    send(base + "/eq/" + b + "/type");
-    send(base + "/eq/" + b + "/f");
-    send(base + "/eq/" + b + "/g");
-    send(base + "/eq/" + b + "/q");
-  }
-  Object.keys(FIELD_SPECS.dyn).forEach((f) => send(base + "/dyn/" + f));
-  Object.keys(FIELD_SPECS.misc).forEach((k) => send(base + "/" + FIELD_SPECS.misc[k].path));
-}
-
-function pushChannel(ch) {
-  const s = channelState[ch];
-  if (mainWindow) mainWindow.webContents.send("x32-channel", { ch, name: s.name, fader: s.fader, faderDb: proto.faderToDb(s.fader), muted: s.muted, color: s.color });
-}
-function pushChannelDetail(ch) {
-  const s = channelState[ch];
-  if (mainWindow) mainWindow.webContents.send("x32-channel-detail", { ch, eq: s.eq, dyn: s.dyn, misc: s.misc });
-}
-
-function handleMessage(msg) {
-  let address, args;
-  try { ({ address, args } = proto.decodeMessage(msg)); } catch (e) { return; }
-
-  const chMatch = address.match(/^\/ch\/(\d\d)\/(.+)$/);
-  if (chMatch) {
-    const ch = parseInt(chMatch[1], 10);
-    const sub = chMatch[2];
-    const s = channelState[ch];
-    if (!s || !args.length) return;
-    if (sub === "config/name") { s.name = args[0].value || s.name; pushChannel(ch); }
-    else if (sub === "mix/fader") { s.fader = args[0].value; pushChannel(ch); }
-    else if (sub === "mix/on") { s.muted = args[0].value === 0; pushChannel(ch); }
-    else if (sub === "config/color") { s.color = args[0].value; pushChannel(ch); }
-    else if (MISC_BY_PATH[sub]) {
-      const key = MISC_BY_PATH[sub];
-      const spec = FIELD_SPECS.misc[key];
-      s.misc[key] = spec.kind === "enum" ? args[0].value : normToActual(spec, args[0].value);
-      pushChannelDetail(ch);
-    }
-    else {
-      const eqMatch = sub.match(/^eq\/(\d)\/(type|f|g|q)$/);
-      if (eqMatch) {
-        const field = eqMatch[2];
-        const spec = FIELD_SPECS.eq[field];
-        const raw = args[0].value;
-        s.eq[parseInt(eqMatch[1], 10) - 1][field] = spec.kind === "enum" ? raw : normToActual(spec, raw);
-        pushChannelDetail(ch);
-      } else if (sub.startsWith("dyn/")) {
-        const field = sub.slice(4);
-        const spec = FIELD_SPECS.dyn[field];
-        if (spec) {
-          const raw = args[0].value;
-          s.dyn[field] = spec.kind === "enum" ? raw : normToActual(spec, raw);
-          pushChannelDetail(ch);
-        }
-      }
-    }
-    return;
-  }
-
-  if (address === "/meters/1") {
-    const blobArg = args.find((a) => a.type === "b");
-    if (blobArg) {
-      const values = proto.parseMeterBlob(blobArg.value);
-      if (mainWindow) mainWindow.webContents.send("x32-meters", { levels: Array.from(values.slice(0, 32)), dynGr: Array.from(values.slice(64, 96)) });
-    }
-  }
-}
-
-function startKeepAlive() {
-  stopKeepAlive();
-  xremoteTimer = setInterval(() => send("/xremote"), 8000);
-  metersTimer = setInterval(() => send("/meters", [{ type: "s", value: "/meters/1" }]), 8000);
-}
-function stopKeepAlive() {
-  clearInterval(xremoteTimer); clearInterval(metersTimer);
-  xremoteTimer = null; metersTimer = null;
-}
+function log(msg) { toRenderer("x32-log", msg); }
 
 // ---------- Netzwerk-Suche (aktuelles WLAN durchsuchen statt IP eintippen) ----------
 function localSubnetCandidates() {
@@ -192,7 +44,7 @@ ipcMain.handle("x32-scan", async () => {
     const scanSocket = dgram.createSocket("udp4");
     scanSocket.on("message", (msg, rinfo) => {
       try {
-        const { address, args } = proto.decodeMessage(msg);
+        const { address, args } = OSC.decodeMessage(msg);
         if (address === "/xinfo" && args.length >= 3) {
           found.set(rinfo.address, { ip: rinfo.address, name: args[1].value, model: args[2].value, version: args[3] ? args[3].value : "" });
         }
@@ -200,58 +52,57 @@ ipcMain.handle("x32-scan", async () => {
     });
     scanSocket.on("error", () => {});
     scanSocket.bind(() => {
-      const buf = proto.encodeMessage("/xinfo", []);
+      const buf = OSC.encodeMessage("/xinfo", []);
       info.candidates.forEach((ip) => { try { scanSocket.send(buf, 0, buf.length, X32_PORT, ip); } catch (e) {} });
       setTimeout(() => { scanSocket.close(); resolve(Array.from(found.values())); }, 1800);
     });
   });
 });
 
-ipcMain.handle("x32-connect", async (event, ip) => {
+// ---------- Verbindung zum Pult ----------
+function disconnect() {
+  if (client) { client.stop(); client = null; }
+  if (socket) { try { socket.close(); } catch (e) {} socket = null; }
+}
+
+function connect(ip) {
   return new Promise((resolve) => {
-    try {
-      if (socket) { socket.close(); socket = null; }
-      targetIp = ip;
-      socket = dgram.createSocket("udp4");
-      socket.on("message", handleMessage);
-      socket.on("error", (err) => log("Netzwerkfehler: " + err.message));
-      socket.bind(() => {
-        send("/xremote");
-        send("/meters", [{ type: "s", value: "/meters/1" }]);
-        for (let ch = 1; ch <= 32; ch++) requestChannelBasics(ch);
-        startKeepAlive();
-        resolve({ ok: true });
+    disconnect();
+    const sock = dgram.createSocket("udp4");
+    socket = sock;
+    sock.on("error", (err) => log("Netzwerkfehler: " + err.message));
+    sock.on("message", (msg) => {
+      if (client) client.receive(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
+    });
+    sock.bind(() => {
+      client = new X32Client({
+        send: (u8) => { try { sock.send(u8, X32_PORT, ip); } catch (e) {} },
+        onBatch: (entries) => toRenderer("x32-batch", entries),
+        onMeter: (id, floats) => toRenderer("x32-meter", id, floats),
+        onStatus: (status) => toRenderer("x32-status", status),
+        onLog: log,
       });
-    } catch (e) { resolve({ ok: false, error: e.message }); }
+      client.start();
+      resolve({ ok: true });
+    });
   });
-});
+}
 
-ipcMain.handle("x32-disconnect", async () => {
-  stopKeepAlive();
-  if (socket) { socket.close(); socket = null; }
-  targetIp = null;
-  return { ok: true };
-});
+const validPath = (p) => typeof p === "string" && p.startsWith("/") && p.length < 120;
+const validPaths = (list) => Array.isArray(list) && list.every(validPath);
 
-ipcMain.handle("x32-set-fader", async (event, ch, value) => { send(chAddr(ch) + "/mix/fader", [{ type: "f", value }]); });
-ipcMain.handle("x32-set-mute", async (event, ch, muted) => { send(chAddr(ch) + "/mix/on", [{ type: "i", value: muted ? 0 : 1 }]); });
-ipcMain.handle("x32-select-channel", async (event, ch) => { requestChannelDetail(ch); });
-ipcMain.handle("x32-set-eq", async (event, ch, band, field, value) => {
-  if (field === "type") { send(chAddr(ch) + "/eq/" + (band + 1) + "/type", [{ type: "i", value }]); return; }
-  const spec = FIELD_SPECS.eq[field];
-  send(chAddr(ch) + "/eq/" + (band + 1) + "/" + field, [{ type: "f", value: actualToNorm(spec, value) }]);
+ipcMain.handle("x32-connect", (event, ip) => connect(String(ip)));
+ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }; });
+ipcMain.handle("x32-snapshot", async () => (client ? client.snapshot() : []));
+// Häufige, schnelle Aufrufe ohne Antwort (ipcRenderer.send), damit die Übertragung so kurz wie möglich bleibt
+ipcMain.on("x32-set", (event, path, type, value) => {
+  if (client && validPath(path) && "fis".includes(type)) client.set(path, type, value);
 });
-ipcMain.handle("x32-set-dyn", async (event, ch, field, value) => {
-  const spec = FIELD_SPECS.dyn[field];
-  if (!spec) return;
-  if (spec.kind === "enum") { send(chAddr(ch) + "/dyn/" + field, [{ type: "i", value }]); return; }
-  send(chAddr(ch) + "/dyn/" + field, [{ type: "f", value: actualToNorm(spec, value) }]);
-});
-ipcMain.handle("x32-set-misc", async (event, ch, key, value) => {
-  const spec = FIELD_SPECS.misc[key];
-  if (!spec) return;
-  if (spec.kind === "enum") { send(chAddr(ch) + "/" + spec.path, [{ type: "i", value }]); return; }
-  send(chAddr(ch) + "/" + spec.path, [{ type: "f", value: actualToNorm(spec, value) }]);
+ipcMain.on("x32-want", (event, paths) => { if (client && validPaths(paths)) client.want(paths); });
+ipcMain.on("x32-hot", (event, paths) => { if (client && validPaths(paths)) client.setHot(paths); });
+ipcMain.on("x32-refresh", (event, paths, urgent) => { if (client && validPaths(paths)) client.refresh(paths, !!urgent); });
+ipcMain.on("x32-meters", (event, streams) => {
+  if (client && Array.isArray(streams) && streams.every((x) => /^[0-9]+(:[0-9]+)?$/.test(String(x)))) client.setMeters(streams.map(String));
 });
 
 function createWindow() {
@@ -402,4 +253,4 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-app.on("before-quit", () => { stopKeepAlive(); if (socket) socket.close(); });
+app.on("before-quit", () => { disconnect(); });

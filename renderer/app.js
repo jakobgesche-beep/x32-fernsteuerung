@@ -4,6 +4,7 @@ const statusText = document.getElementById('status-text');
 const ipInput = document.getElementById('ip-input');
 const connectBtn = document.getElementById('connect-btn');
 const scanBtn = document.getElementById('scan-btn');
+const layerTabs = document.getElementById('layer-tabs');
 
 function el(html){ const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
@@ -27,52 +28,60 @@ function levelToPct(v){
   return Math.max(0, Math.min(100, (20 * Math.log10(v) + 60) / 60 * 100));
 }
 
-function faderToDb(f){
-  if(f >= 0.5) return f * 40 - 30;
-  if(f >= 0.25) return f * 80 - 50;
-  if(f >= 0.0625) return f * 160 - 70;
-  if(f > 0) return f * 480 - 90;
-  return -90;
-}
+const STRIPS = X32V.buildStrips();
+const STRIP_BY_ID = {};
+STRIPS.forEach((s) => { STRIP_BY_ID[s.id] = s; });
 
-let connected = false;
-const channels = {};
-for(let ch = 1; ch <= 32; ch++) channels[ch] = { name: 'CH ' + String(ch).padStart(2, '0'), fader: 0, faderDb: -90, muted: false, color: 0 };
+// ================= Verbindung =================
+let wantedOnce = false;
+let lastState = 'idle';
 
-const stripEls = {};
-
-function setConnected(isConnected){
-  connected = isConnected;
-  statusText.textContent = isConnected ? 'Verbunden' : 'nicht verbunden';
-  statusBadge.classList.toggle('live', isConnected);
-  connectBtn.textContent = isConnected ? 'Trennen' : 'Verbinden';
-}
-
-connectBtn.addEventListener('click', async () => {
-  if(connected){
-    await window.x32API.disconnect();
-    setConnected(false);
-    return;
+function updateStatus(s){
+  const st = s.state;
+  statusBadge.classList.remove('live', 'warn', 'bad');
+  let text = 'nicht verbunden';
+  if(st === 'connecting'){ text = 'Verbinde…'; statusBadge.classList.add('warn'); }
+  else if(st === 'lost'){ text = 'Verbindung verloren – suche…'; statusBadge.classList.add('bad'); }
+  else if(st === 'online'){
+    statusBadge.classList.add('live');
+    if(s.progress < 1 && s.open > 40) text = 'Synchronisiere ' + Math.round(s.progress * 100) + ' %';
+    else text = 'Verbunden' + (s.info && s.info.model ? ' · ' + s.info.model : '') + (s.rtt != null ? ' · ' + Math.round(s.rtt) + ' ms' : '');
   }
-  const ip = ipInput.value.trim() || '192.168.0.64';
-  ipInput.value = ip;
-  try { localStorage.setItem('x32-ip', ip); } catch(e){}
-  const res = await window.x32API.connect(ip);
-  if(res.ok){ setConnected(true); toast('Verbunden mit ' + ip); }
-  else toast('Verbindung fehlgeschlagen: ' + res.error, true);
-});
+  statusText.textContent = text;
+  connectBtn.textContent = st === 'idle' ? 'Verbinden' : 'Trennen';
+  if(st === 'online' && !wantedOnce){ wantedOnce = true; wantAll(); }
+  if(st === 'lost' && lastState !== 'lost') toast('Verbindung zum Pult verloren – die App versucht es automatisch weiter.', true);
+  lastState = st;
+}
+X.onStatus(updateStatus);
 
-try { const savedIp = localStorage.getItem('x32-ip'); if(savedIp) ipInput.value = savedIp; } catch(e){}
+// alle Kanäle laden: sichtbare Ebene zuerst
+function wantAll(){
+  const order = X32V.LAYERS.map((l) => l.id).sort((a, b) => (a === currentLayer ? -1 : b === currentLayer ? 1 : 0));
+  order.forEach((id) => X.want(layerPaths(id)));
+}
+function layerStrips(id){ return STRIPS.filter((s) => s.layer === id); }
+function layerPaths(id){ return layerStrips(id).flatMap((s) => X32V.basicPaths(s)); }
 
-// ================= Pult-Suche (aktuelles WLAN durchsuchen) =================
 async function connectTo(ip){
   ipInput.value = ip;
   try { localStorage.setItem('x32-ip', ip); } catch(e){}
+  wantedOnce = false;
   const res = await window.x32API.connect(ip);
-  if(res.ok){ setConnected(true); toast('Verbunden mit ' + ip); }
-  else toast('Verbindung fehlgeschlagen: ' + res.error, true);
+  if(!res.ok) toast('Verbindung fehlgeschlagen: ' + res.error, true);
 }
 
+connectBtn.addEventListener('click', async () => {
+  if(X.status().state !== 'idle'){
+    await window.x32API.disconnect();
+    updateStatus({ state: 'idle', progress: 1 });
+    return;
+  }
+  connectTo(ipInput.value.trim() || '192.168.0.64');
+});
+try { const savedIp = localStorage.getItem('x32-ip'); if(savedIp) ipInput.value = savedIp; } catch(e){}
+
+// ---------- Pult-Suche (aktuelles WLAN durchsuchen) ----------
 function showConsolePicker(results){
   const overlay = el('<div class="overlay"></div>');
   const box = el('<div class="detail-card" style="max-width:380px;"></div>');
@@ -104,70 +113,126 @@ scanBtn.addEventListener('click', async () => {
   }
 });
 
-function buildStrip(ch){
+// ================= Ebenen & Fader-Streifen =================
+let currentLayer = 'ch';
+let stripUI = {};
+let unsubscribers = [];
+
+function buildStrip(strip){
+  const ui = { strip, iconId: null, tracks: [], fills: [] };
   const wrap = el('<div class="strip"></div>');
-  wrap.appendChild(el('<div class="strip-num">CH ' + String(ch).padStart(2, '0') + '</div>'));
+  wrap.appendChild(el('<div class="strip-num">' + esc(strip.label) + '</div>'));
+
+  const plate = el('<div class="strip-plate"></div>');
+  const icon = el('<div class="strip-icon"></div>');
   const name = el('<div class="strip-name"></div>');
-  wrap.appendChild(name);
+  plate.appendChild(icon);
+  plate.appendChild(name);
+  wrap.appendChild(plate);
 
   const row = el('<div class="meter-fader-row"></div>');
-  const meterTrack = el('<div class="meter-track"></div>');
-  const meterFill = el('<div class="meter-fill" style="height:100%;"></div>');
-  meterTrack.appendChild(meterFill);
-  const fader = el('<input type="range" class="strip-fader" min="0" max="1" step="0.001" value="0">');
-  row.appendChild(meterTrack);
+  const nMeters = strip.meter ? strip.meter.idx.length : 0;
+  for(let i = 0; i < nMeters; i++){
+    const track = el('<div class="meter-track"></div>');
+    const fill = el('<div class="meter-fill" style="height:100%;"></div>');
+    track.appendChild(fill);
+    row.appendChild(track);
+    ui.fills.push(fill);
+  }
+  const fader = el('<input type="range" class="strip-fader" min="0" max="1" step="0.0005" value="0">');
   row.appendChild(fader);
   wrap.appendChild(row);
 
   const dbLabel = el('<div class="db-label">-oo</div>');
   wrap.appendChild(dbLabel);
-
   const muteBtn = el('<button class="mute-btn">MUTE</button>');
   wrap.appendChild(muteBtn);
 
-  let lastFaderSend = 0;
+  const faderPath = X32V.stripPath(strip, strip.faderLeaf);
+  const onPath = X32V.stripPath(strip, strip.onLeaf);
   fader.addEventListener('input', () => {
     const v = parseFloat(fader.value);
-    dbLabel.textContent = fmt(faderToDb(v), 1);
-    const now = performance.now();
-    if(now - lastFaderSend < 20) return;
-    lastFaderSend = now;
-    window.x32API.setFader(ch, v);
+    dbLabel.textContent = v <= 0 ? '-oo' : fmt(X32V.faderToDb(v), 1);
+    X.setWire(faderPath, 'f', v);
   });
-  fader.addEventListener('change', () => window.x32API.setFader(ch, parseFloat(fader.value)));
+  fader.addEventListener('dblclick', () => X.setWire(faderPath, 'f', 0.75));
   muteBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    window.x32API.setMute(ch, !channels[ch].muted);
+    const on = X.get(onPath);
+    X.setWire(onPath, 'i', on === 0 ? 1 : 0);
   });
-  wrap.addEventListener('click', () => openDetail(ch));
+  if(strip.eqBands) plate.addEventListener('click', () => openDetail(strip));
+  else plate.classList.add('plain');
 
-  stripEls[ch] = { wrap, name, meterFill, fader, dbLabel, muteBtn };
-  return wrap;
+  Object.assign(ui, { wrap, icon, name, fader, dbLabel, muteBtn, faderPath, onPath });
+  return ui;
 }
 
-function applyChannelUpdate(data){
-  const s = channels[data.ch];
-  s.name = data.name; s.fader = data.fader; s.faderDb = data.faderDb; s.muted = data.muted; s.color = data.color || 0;
-  const ui = stripEls[data.ch];
-  if(!ui) return;
-  ui.name.textContent = data.name;
-  const c = chColor(s.color);
-  ui.name.style.background = c.bg; ui.name.style.color = c.fg; ui.name.style.borderColor = c.border;
-  if(document.activeElement !== ui.fader) ui.fader.value = data.fader;
-  ui.dbLabel.textContent = data.faderDb <= -89.9 ? '-oo' : fmt(data.faderDb, 1);
-  ui.wrap.classList.toggle('muted', data.muted);
-  ui.muteBtn.classList.toggle('active', data.muted);
+function paintStrip(ui){
+  const s = ui.strip, b = s.base;
+  const nameV = X.get(b + '/config/name');
+  ui.name.textContent = nameV !== undefined && nameV !== '' ? nameV : s.label;
+  const color = X.get(b + '/config/color');
+  const c = chColor(color);
+  ui.icon.parentElement.style.background = c.bg;
+  ui.icon.parentElement.style.color = c.fg;
+  ui.icon.parentElement.style.borderColor = c.border;
+  const iconId = X.get(b + '/config/icon');
+  if(iconId !== ui.iconId){ ui.iconId = iconId; ui.icon.innerHTML = iconId ? X32Icons.svg(iconId, 26) : ''; }
+  const f = X.get(ui.faderPath);
+  if(f !== undefined){
+    if(document.activeElement !== ui.fader) ui.fader.value = f;
+    ui.dbLabel.textContent = f <= 0 ? '-oo' : fmt(X32V.faderToDb(f), 1);
+  }
+  const on = X.get(ui.onPath);
+  const muted = on === 0;
+  ui.wrap.classList.toggle('muted', muted);
+  ui.muteBtn.classList.toggle('active', muted);
 }
 
-window.x32API.onChannel((data) => applyChannelUpdate(data));
-window.x32API.onMeters((payload) => {
-  payload.levels.forEach((v, i) => {
-    const ui = stripEls[i + 1];
-    if(ui) ui.meterFill.style.height = (100 - levelToPct(v)).toFixed(0) + '%';
+function setLayer(id){
+  currentLayer = id;
+  layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === id));
+  unsubscribers.forEach((u) => u());
+  unsubscribers = [];
+  stripUI = {};
+  const row = el('<div class="strip-row"></div>');
+  layerStrips(id).forEach((strip) => {
+    const ui = buildStrip(strip);
+    stripUI[strip.id] = ui;
+    row.appendChild(ui.wrap);
+    paintStrip(ui);
+    unsubscribers.push(X.subscribe(strip.base + '/', () => paintStrip(ui)));
   });
-  if(typeof processingMeters === 'function') processingMeters(payload);
+  app.innerHTML = '';
+  app.appendChild(row);
+  if(X.status().state === 'online') X.want(layerPaths(id));
+  updateHot();
+}
+
+// Werte, die regelmäßig nachgelesen werden: Fader/Mute der sichtbaren Ebene
+function updateHot(){
+  X.setHotGroup('layer', layerStrips(currentLayer).flatMap((s) => [X32V.stripPath(s, s.faderLeaf), X32V.stripPath(s, s.onLeaf)]));
+}
+
+function buildLayerTabs(){
+  X32V.LAYERS.forEach((l) => {
+    const b = el('<button class="layer-tab" data-layer="' + l.id + '">' + esc(l.label) + '</button>');
+    b.addEventListener('click', () => setLayer(l.id));
+    layerTabs.appendChild(b);
+  });
+}
+
+// Pegel auf die sichtbaren Streifen verteilen
+X.onMeter((id, floats) => {
+  for(const sid in stripUI){
+    const ui = stripUI[sid], m = ui.strip.meter;
+    if(!m || m.stream !== id) continue;
+    m.idx.forEach((idx, i) => { if(ui.fills[i] && idx < floats.length) ui.fills[i].style.height = (100 - levelToPct(floats[idx])).toFixed(0) + '%'; });
+  }
+  if(typeof processingMeters === 'function') processingMeters(id, floats);
 });
-window.x32API.onLog((msg) => { /* könnte in ein Log-Panel, aktuell nur Toast bei Bedarf */ });
+window.x32API.onLog((msg) => { /* Diagnose-Meldungen, aktuell nicht angezeigt */ });
 
 // ================= Auto-Update =================
 let updateBar = null;
@@ -190,12 +255,7 @@ window.x32API.onUpdateError((msg) => {
 });
 window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; });
 
-// ================= Aufbau =================
-function render(){
-  app.innerHTML = '';
-  app.appendChild(el('<p class="hint">IP-Adresse des X32 eingeben (Standard-Werksadresse: 192.168.0.64) und „Verbinden" klicken. Klick auf einen Kanal öffnet EQ &amp; Kompressor.</p>'));
-  const row = el('<div class="strip-row"></div>');
-  for(let ch = 1; ch <= 32; ch++) row.appendChild(buildStrip(ch));
-  app.appendChild(row);
-}
-render();
+// ================= Start =================
+buildLayerTabs();
+setLayer('ch');
+X.loadSnapshot().then(() => { STRIPS.forEach((s) => { if(stripUI[s.id]) paintStrip(stripUI[s.id]); }); });

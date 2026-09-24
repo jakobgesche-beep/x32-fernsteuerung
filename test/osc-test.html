@@ -1,0 +1,53 @@
+<!DOCTYPE html><html><body><pre id="out"></pre>
+<script src="../shared/osc.js"></script>
+<script>
+const out = [];
+const hex = (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join('');
+const fromHex = (h) => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+let fails = 0;
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FEHLER') + ' ' + name + (detail ? '  ' + detail : '')); }
+
+// Beispiele direkt aus der X32-OSC-Spezifikation (Patrick-Gilles Maillot)
+const f825 = new DataView(fromHex('3f5334cd').buffer).getFloat32(0, false);
+let h = hex(X32OSC.encodeMessage('/ch/01/mix/fader', [{ type: 'f', value: f825 }]));
+check('fader 0.825', h === '2f63682f30312f6d69782f6661646572000000002c6600003f5334cd', h);
+h = hex(X32OSC.encodeMessage('/ch/02/mix/pan', [{ type: 'f', value: 0.75 }]));
+check('pan 0.75', h === '2f63682f30322f6d69782f70616e00002c6600003f400000', h);
+h = hex(X32OSC.encodeMessage('/ch/01/eq/1/q', [{ type: 'f', value: 0.4648 }]));
+check('eq q 0.4648', h === '2f63682f30312f65712f312f710000002c6600003eedfa44', h);
+h = hex(X32OSC.encodeMessage('/meters', [{ type: 's', value: '/meters/6' }, { type: 'i', value: 16 }]));
+check('/meters ,si /meters/6 16', h === '2f6d6574657273002c7369002f6d65746572732f3600000000000010', h);
+
+// Antwort mit Meter-Blob (Beispiel aus der Spezifikation)
+const reply = fromHex('2f6d65746572732f360000002c6200000000001404000000fd1d2137fdff7f3f0000803f6ebbd534');
+const msg = X32OSC.decodeMessage(reply);
+check('meter reply: Adresse', msg.address === '/meters/6', msg.address);
+check('meter reply: Blob-Argument', msg.args.length === 1 && msg.args[0].type === 'b', JSON.stringify(msg.args.map(a => a.type)));
+const floats = X32OSC.parseMeterBlob(msg.args[0].value);
+check('meter reply: 4 Werte', floats.length === 4, 'Anzahl ' + floats.length);
+check('meter reply: Werte plausibel (Eingang ~0, Gate ~1, Dyn 1.0, Post ~0)',
+  floats[0] < 0.001 && Math.abs(floats[1] - 1) < 0.001 && floats[2] === 1 && floats[3] < 0.001, Array.from(floats).map(v => v.toExponential(2)).join(' '));
+
+// Rundlauf Blob
+const blobMsg = X32OSC.decodeMessage(X32OSC.encodeMessage('/meters/1', [{ type: 'b', value: X32OSC.buildMeterBlob([0.5, 0.25, 1]) }]));
+const back = X32OSC.parseMeterBlob(blobMsg.args[0].value);
+check('Blob Rundlauf', back.length === 3 && back[0] === 0.5 && back[1] === 0.25 && back[2] === 1, Array.from(back).join(','));
+
+// /info Antwort
+const info = fromHex(Array.from(new TextEncoder().encode('/info\0\0\0,ssss\0\0\0V2.05\0\0\0osc-server\0\0X32\0' + '2.10\0\0\0\0')).map(b => b.toString(16).padStart(2, '0')).join(''));
+const im = X32OSC.decodeMessage(info);
+check('/info 4 Strings', im.address === '/info' && im.args.map(a => a.value).join('|') === 'V2.05|osc-server|X32|2.10', im.args.map(a => a.value).join('|'));
+
+// Nachrichten ohne Argumente und ohne Typ-Tag (älteres Format)
+const noArgs = X32OSC.decodeMessage(X32OSC.encodeMessage('/xremote'));
+check('/xremote ohne Argumente', noArgs.address === '/xremote' && noArgs.args.length === 0);
+const legacy = X32OSC.decodeMessage(fromHex('2f696e666f000000'));
+check('/info ohne Typ-Tag', legacy.address === '/info' && legacy.args.length === 0);
+
+// Rundlauf mit Umlauten / Strings
+const s = X32OSC.decodeMessage(X32OSC.encodeMessage('/ch/01/config/name', [{ type: 's', value: 'Bühne 1' }]));
+check('String mit Umlaut', s.args[0].value === 'Bühne 1', s.args[0].value);
+
+out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');
+document.getElementById('out').textContent = out.join('\n');
+</script></body></html>

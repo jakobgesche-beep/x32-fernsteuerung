@@ -1,21 +1,16 @@
 // ================= Processing-Ansicht: EQ + Kompressor im Stil der X32-Oberfläche =================
 // Benötigt aus app.js: el(), esc(), fmt(), toast(), channels, chColor(), levelToPct()
 
-const EQ_TYPES = ['LCut', 'LShv', 'PEQ', 'VEQ', 'HShv', 'HCut'];
-const BAND_NAMES = ['Low', 'LoMid', 'HiMid', 'High'];
-const BAND_COLORS = ['#3EC9C9', '#4C9BE0', '#E8548C', '#F0A83C'];
-const DYN_RATIOS = [1.1, 1.3, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.0, 10, 20, 100];
-const FILTER_TYPES = ['LC6', 'LC12', 'HC6', 'HC12', '1.0', '2.0', '3.0', '5.0', '10.0'];
-const HP_SLOPES = [12, 18, 24];
-const KEY_SOURCES = (() => {
-  const list = ['Self'];
-  for(let i = 1; i <= 32; i++) list.push('In ' + String(i).padStart(2, '0'));
-  for(let i = 1; i <= 6; i++) list.push('Aux ' + i);
-  list.push('USB L', 'USB R');
-  for(let i = 1; i <= 4; i++) list.push('Fx ' + i + 'L', 'Fx ' + i + 'R');
-  for(let i = 1; i <= 16; i++) list.push('Bus ' + String(i).padStart(2, '0'));
-  return list;
-})();
+const V = X32V;
+const EQ_TYPES = V.EQ_TYPES_EXT;
+const DYN_RATIOS = V.DYN_RATIOS;
+const FILTER_TYPES = V.FILTER_TYPES;
+const HP_SLOPES = V.HP_SLOPES;
+const KEY_SOURCES = V.KEY_SOURCES;
+const BAND_NAMES = { 4: ['Low', 'LoMid', 'HiMid', 'High'], 6: ['Low', 'Low2', 'LoMid', 'HiMid', 'High2', 'High'] };
+const BAND_COLORS = { 4: ['#3EC9C9', '#4C9BE0', '#E8548C', '#F0A83C'], 6: ['#4FD0D0', '#3AA0A0', '#E8548C', '#F0A83C', '#E0524F', '#4CAF60'] };
+const bandName = (i) => BAND_NAMES[proc.strip.eqBands][i];
+const bandColor = (i) => BAND_COLORS[proc.strip.eqBands][i];
 
 const SAMPLE_RATE = 48000;
 const EQ_MIN_DB = -15, EQ_MAX_DB = 15, EQ_MIN_F = 20, EQ_MAX_F = 20000;
@@ -74,14 +69,30 @@ function hpfDb(fc, slopeDbPerOct, f){
   const n = slopeDbPerOct / 6;
   return -10 * Math.log10(1 + Math.pow(fc / f, 2 * n));
 }
+// Typen 6..13 (nur Bus/Matrix/Main, Band 1 und 6): BU6 BU12 BS12 LR12 BU18 BU24 BS24 LR24.
+// Butterworth exakt, Bessel als Butterworth genähert, Linkwitz-Riley als zwei kaskadierte Butterworth.
+function extendedCutDb(type, isLowCut, fc, f){
+  const r = isLowCut ? fc / f : f / fc;
+  const bu = (n) => -10 * Math.log10(1 + Math.pow(r, 2 * n));
+  switch(type){
+    case 6: return bu(1);
+    case 7: case 8: return bu(2);
+    case 9: return 2 * bu(1);
+    case 10: return bu(3);
+    case 11: case 12: return bu(4);
+    case 13: return 2 * bu(2);
+  }
+  return 0;
+}
+function bandIsCut(b){ return b.type === 0 || b.type === 5 || b.type >= 6; }
 function eqResponseDb(f, eq, misc){
   let total = 0;
   if(misc.hpOn && misc.hpf) total += hpfDb(misc.hpf, HP_SLOPES[misc.hpSlope] || 18, f);
   if(misc.eqOn !== 0){
-    eq.forEach((b) => {
+    eq.forEach((b, i) => {
       if(b.type === undefined || b.f === undefined || b.g === undefined || b.q === undefined) return;
-      const cut = b.type === 0 || b.type === 5;
-      total += magnitudeDb(biquadCoeffs(EQ_TYPES[b.type], b.f, b.g, cut ? Math.SQRT1_2 : b.q), f);
+      if(b.type >= 6) total += extendedCutDb(b.type, i < eq.length / 2, b.f, f);
+      else total += magnitudeDb(biquadCoeffs(EQ_TYPES[b.type], b.f, b.g, bandIsCut(b) ? Math.SQRT1_2 : b.q), f);
     });
   }
   return total;
@@ -126,33 +137,30 @@ function fmtFreq(f){ return f >= 1000 ? (f / 1000).toFixed(2) + ' kHz' : (Math.r
 // ---------- Zustand ----------
 let proc = null;
 
-// Während eines Ziehens ignorieren wir das Echo vom Pult (sonst springt der Regler
-// zurück) und holen die Werte danach einmal frisch ab.
-function procBusy(on){
-  if(!proc) return;
-  proc.busy = Math.max(0, proc.busy + (on ? 1 : -1));
-  if(!on && proc.busy === 0) window.x32API.selectChannel(proc.ch);
-}
+const MISC_LEAF = { eqOn: 'eq/on', hpOn: 'preamp/hpon', hpSlope: 'preamp/hpslope', hpf: 'preamp/hpf' };
+// Eigene Änderungen gehen sofort in den lokalen Zwischenspeicher (Anzeige aktualisiert sich über
+// das Abonnement) und zum Pult.
+function setEqLocal(band, field, value){ X.set(proc.strip.base + '/eq/' + (band + 1) + '/' + field, value); }
+function setMiscLocal(key, value){ X.set(proc.strip.base + '/' + MISC_LEAF[key], value); }
+function setDynLocal(field, value){ X.set(proc.strip.base + '/dyn/' + field, value); }
 
-function setEqLocal(band, field, value){
-  proc.eq[band][field] = value;
-  refreshEq();
-  window.x32API.setEq(proc.ch, band, field, value);
-}
-function setMiscLocal(key, value){
-  proc.misc[key] = value;
-  refreshEq();
-  window.x32API.setMisc(proc.ch, key, value);
-}
-function setDynLocal(field, value, live){
-  proc.dyn[field] = value;
-  refreshDyn();
-  if(live){
-    const now = performance.now();
-    if(now - (proc.lastSend[field] || 0) < 25) return;
-    proc.lastSend[field] = now;
+// Werte des Kanals aus dem Zwischenspeicher in die Anzeige-Struktur übernehmen
+function pullFromStore(){
+  const s = proc.strip, b = s.base;
+  proc.eq.forEach((band, i) => {
+    const base = b + '/eq/' + (i + 1) + '/';
+    band.type = X.get(base + 'type');
+    band.f = X.actual(base + 'f');
+    band.g = X.actual(base + 'g');
+    band.q = X.actual(base + 'q');
+  });
+  proc.misc.eqOn = X.get(b + '/eq/on');
+  if(s.hpf){
+    proc.misc.hpOn = X.get(b + '/preamp/hpon');
+    proc.misc.hpSlope = X.get(b + '/preamp/hpslope');
+    proc.misc.hpf = X.actual(b + '/preamp/hpf');
   }
-  window.x32API.setDyn(proc.ch, field, value);
+  if(s.dyn) V.DYN_KEYS.forEach((k) => { proc.dyn[k] = X.actual(b + '/dyn/' + k); });
 }
 
 // ---------- kleine UI-Bausteine ----------
@@ -220,9 +228,9 @@ function makeVBar(opts){
     paint();
     emit(false);
   }
-  track.addEventListener('pointerdown', (e) => { dragging = true; procBusy(true); track.setPointerCapture(e.pointerId); move(e); });
+  track.addEventListener('pointerdown', (e) => { dragging = true; track.setPointerCapture(e.pointerId); move(e); });
   track.addEventListener('pointermove', (e) => { if(dragging) move(e); });
-  const endDrag = () => { if(dragging){ dragging = false; emit(true); procBusy(false); } };
+  const endDrag = () => { if(dragging){ dragging = false; emit(true); } };
   track.addEventListener('pointerup', endDrag);
   track.addEventListener('pointercancel', endDrag);
   track.addEventListener('wheel', (e) => {
@@ -258,7 +266,8 @@ function buildEqPage(){
   page.appendChild(canvas);
   page.appendChild(el('<p class="hint">Ring ziehen: Frequenz &amp; Gain · Mausrad auf einem Ring: Güte (Q) · Klick wählt das Band</p>'));
 
-  const controls = el('<div class="eq-controls"></div>');
+  const nBands = proc.strip.eqBands;
+  const controls = el('<div class="eq-controls' + (nBands > 4 ? ' dense' : '') + '" style="grid-template-columns:150px repeat(' + nBands + ',minmax(0,1fr))"></div>');
   const left = el('<div class="eq-left"></div>');
   const eqBtn = makeXButton('EQ', () => setMiscLocal('eqOn', proc.misc.eqOn === 0 ? 1 : 0), 'wide');
   const resetBtn = makeXButton('Reset', () => {
@@ -281,16 +290,17 @@ function buildEqPage(){
   lowcut.lastChild.appendChild(el('<span>Hz</span>'));
   lowcut.appendChild(hpSlope);
   lowcut.appendChild(el('<div class="lc-label">Low Cut</div>'));
-  left.appendChild(lowcut);
+  if(proc.strip.hpf) left.appendChild(lowcut);
   controls.appendChild(left);
 
   const cols = [];
-  for(let b = 0; b < 4; b++){
-    const col = el('<div class="eq-col" style="--bc:' + BAND_COLORS[b] + '"></div>');
-    const head = el('<button class="eq-band-btn">' + BAND_NAMES[b] + '</button>');
+  for(let b = 0; b < nBands; b++){
+    const col = el('<div class="eq-col" style="--bc:' + bandColor(b) + '"></div>');
+    const head = el('<button class="eq-band-btn">' + bandName(b) + '</button>');
     head.addEventListener('click', () => { proc.sel = b; refreshEq(); });
     const typeSel = el('<select></select>');
-    EQ_TYPES.forEach((t, i) => typeSel.appendChild(el('<option value="' + i + '">' + t + '</option>')));
+    const extended = nBands === 6 && (b === 0 || b === nBands - 1);
+    EQ_TYPES.forEach((t, i) => { if(extended || i < 6) typeSel.appendChild(el('<option value="' + i + '">' + t + '</option>')); });
     typeSel.addEventListener('change', () => setEqLocal(b, 'type', parseInt(typeSel.value, 10)));
     const mk = (label, attrs, unit, field, parse) => {
       const row = el('<label class="eq-row"><span>' + label + '</span></label>');
@@ -324,11 +334,10 @@ function eqX(f, g){ return EQ_PAD.l + (Math.log10(f) - Math.log10(EQ_MIN_F)) / (
 function eqFreqAt(x, g){ const t = clamp((x - EQ_PAD.l) / g.pw, 0, 1); return Math.pow(10, Math.log10(EQ_MIN_F) + t * (Math.log10(EQ_MAX_F) - Math.log10(EQ_MIN_F))); }
 function eqY(db, g){ return EQ_PAD.t + (EQ_MAX_DB - db) / (EQ_MAX_DB - EQ_MIN_DB) * g.ph; }
 function eqDbAt(y, g){ const t = clamp((y - EQ_PAD.t) / g.ph, 0, 1); return EQ_MAX_DB - t * (EQ_MAX_DB - EQ_MIN_DB); }
-function bandIsCut(b){ return b.type === 0 || b.type === 5; }
 function bandHandleY(b, g){ return eqY(bandIsCut(b) ? 0 : clamp(b.g, EQ_MIN_DB, EQ_MAX_DB), g); }
 
 function bindEqCanvas(canvas){
-  let dragBand = null, lastSend = 0;
+  let dragBand = null;
   const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   function nearest(x, y){
     const g = eqGeometry(canvas);
@@ -343,7 +352,7 @@ function bindEqCanvas(canvas){
   canvas.addEventListener('pointerdown', (e) => {
     const p = pos(e);
     dragBand = nearest(p.x, p.y);
-    if(dragBand !== null){ proc.sel = dragBand; procBusy(true); canvas.setPointerCapture(e.pointerId); refreshEq(); }
+    if(dragBand !== null){ proc.sel = dragBand; canvas.setPointerCapture(e.pointerId); refreshEq(); }
   });
   canvas.addEventListener('pointermove', (e) => {
     const p = pos(e);
@@ -351,24 +360,12 @@ function bindEqCanvas(canvas){
     canvas.style.cursor = 'grabbing';
     const g = eqGeometry(canvas);
     const b = proc.eq[dragBand];
-    b.f = clamp(Math.round(eqFreqAt(p.x, g)), EQ_MIN_F, EQ_MAX_F);
-    if(!bandIsCut(b)) b.g = Math.round(eqDbAt(p.y, g) * 4) / 4;
-    refreshEq();
-    const now = performance.now();
-    if(now - lastSend < 25) return;
-    lastSend = now;
-    window.x32API.setEq(proc.ch, dragBand, 'f', b.f);
-    if(!bandIsCut(b)) window.x32API.setEq(proc.ch, dragBand, 'g', b.g);
+    const base = proc.strip.base + '/eq/' + (dragBand + 1) + '/';
+    const pairs = [[base + 'f', clamp(Math.round(eqFreqAt(p.x, g)), EQ_MIN_F, EQ_MAX_F)]];
+    if(!bandIsCut(b)) pairs.push([base + 'g', Math.round(eqDbAt(p.y, g) * 4) / 4]);
+    X.setMany(pairs);
   });
-  const finish = () => {
-    if(dragBand === null) return;
-    const b = proc.eq[dragBand];
-    window.x32API.setEq(proc.ch, dragBand, 'f', b.f);
-    if(!bandIsCut(b)) window.x32API.setEq(proc.ch, dragBand, 'g', b.g);
-    dragBand = null;
-    canvas.style.cursor = 'default';
-    procBusy(false);
-  };
+  const finish = () => { dragBand = null; canvas.style.cursor = 'default'; };
   canvas.addEventListener('pointerup', finish);
   canvas.addEventListener('pointercancel', finish);
   canvas.addEventListener('wheel', (e) => {
@@ -448,7 +445,7 @@ function drawEq(){
   proc.eq.forEach((b, i) => {
     if(b.f === undefined || b.g === undefined) return;
     const x = eqX(b.f, g), y = bandHandleY(b, g);
-    const color = BAND_COLORS[i], sel = proc.sel === i;
+    const color = bandColor(i), sel = proc.sel === i;
     ctx.globalAlpha = eqOn ? 1 : 0.4;
     ctx.strokeStyle = color;
     ctx.globalAlpha = eqOn ? 0.5 : 0.2;
@@ -489,8 +486,7 @@ function refreshEq(){
     if(b.g !== undefined && !active(c.gain)) c.gain.value = fmt(b.g, 2);
     if(b.f !== undefined && !active(c.freq)) c.freq.value = Math.round(b.f);
     if(b.q !== undefined && !active(c.q)) c.q.value = fmt(b.q, 2);
-    const cut = b.type === 0 || b.type === 5;
-    c.gain.disabled = cut;
+    c.gain.disabled = bandIsCut(b);
   });
   drawEq();
 }
@@ -562,13 +558,13 @@ function bindTransferCanvas(cv){
     if(b < 16 && d.mode !== 1) return 'ratio';
     return null;
   }
-  cv.addEventListener('pointerdown', (e) => { dragging = hit(pos(e)); if(dragging){ procBusy(true); cv.setPointerCapture(e.pointerId); } });
+  cv.addEventListener('pointerdown', (e) => { dragging = hit(pos(e)); if(dragging) cv.setPointerCapture(e.pointerId); });
   cv.addEventListener('pointermove', (e) => {
     const p = pos(e);
     if(!dragging){ cv.style.cursor = hit(p) ? 'grab' : 'default'; return; }
     const W = cv.clientWidth, H = cv.clientHeight, d = proc.dyn;
     if(dragging === 'thr'){
-      setDynLocal('thr', clamp(Math.round(tfDbAtX(p.x, W) * 2) / 2, -60, 0), true);
+      setDynLocal('thr', clamp(Math.round(tfDbAtX(p.x, W) * 2) / 2, -60, 0));
     } else {
       const T = d.thr !== undefined ? d.thr : -20;
       const outAt0 = tfDbAtY(p.y, H) - (d.mgain || 0);
@@ -576,14 +572,10 @@ function bindTransferCanvas(cv){
       ratio = clamp(ratio, 1.1, 100);
       let best = 0, bestDiff = Infinity;
       DYN_RATIOS.forEach((r, i) => { const diff = Math.abs(Math.log(r) - Math.log(ratio)); if(diff < bestDiff){ bestDiff = diff; best = i; } });
-      if(best !== d.ratio) setDynLocal('ratio', best, true);
+      if(best !== d.ratio) setDynLocal('ratio', best);
     }
   });
-  const finish = () => {
-    if(dragging){ window.x32API.setDyn(proc.ch, dragging, proc.dyn[dragging]); procBusy(false); }
-    dragging = null;
-    cv.style.cursor = 'default';
-  };
+  const finish = () => { dragging = null; cv.style.cursor = 'default'; };
   cv.addEventListener('pointerup', finish);
   cv.addEventListener('pointercancel', finish);
 }
@@ -760,12 +752,16 @@ function setTab(tab){
 }
 
 let procFrame = null;
-function processingMeters(payload){
+function processingMeters(id, floats){
   if(!proc) return;
-  const v = payload.levels[proc.ch - 1];
-  proc.inDb = v > 0.0001 ? 20 * Math.log10(v) : -90;
-  proc.els.inFill.style.height = (100 - levelToPct(v)).toFixed(0) + '%';
-  proc.gr = grFromFactor(payload.dynGr[proc.ch - 1]);
+  const s = proc.strip;
+  if(s.meter && s.meter.stream === id){
+    let v = 0;
+    s.meter.idx.forEach((k) => { if(k < floats.length) v = Math.max(v, floats[k]); });
+    proc.inDb = v > 0.0001 ? 20 * Math.log10(v) : -90;
+    proc.els.inFill.style.height = (100 - levelToPct(v)).toFixed(0) + '%';
+  }
+  if(s.gr && s.gr.stream === id && s.gr.idx[0] < floats.length) proc.gr = grFromFactor(floats[s.gr.idx[0]]);
   if(proc.tab === 'dyn' && !procFrame){
     procFrame = requestAnimationFrame(() => {
       procFrame = null;
@@ -776,21 +772,24 @@ function processingMeters(payload){
   }
 }
 
-function openDetail(ch){
+function openDetail(strip){
   closeDetail();
-  proc = { ch, tab: 'eq', eq: [{}, {}, {}, {}], misc: {}, dyn: {}, sel: 0, els: {}, inDb: -90, gr: 0, downOnOverlay: false, lastSend: {}, busy: 0 };
+  proc = { strip, tab: 'eq', eq: Array.from({ length: strip.eqBands }, () => ({})), misc: {}, dyn: {}, sel: 0, els: {}, inDb: -90, gr: 0, downOnOverlay: false };
   const overlay = el('<div class="overlay"></div>');
   const card = el('<div class="proc-card"></div>');
 
   const head = el('<div class="proc-head"></div>');
-  const c = chColor(channels[ch].color);
-  const chip = el('<div class="proc-chip" style="background:' + c.bg + ';color:' + c.fg + ';border-color:' + c.border + '"><b>' + esc(channels[ch].name) + '</b><span>Ch ' + String(ch).padStart(2, '0') + '</span></div>');
+  const c = chColor(X.get(strip.base + '/config/color'));
+  const nameV = X.get(strip.base + '/config/name');
+  const iconId = X.get(strip.base + '/config/icon');
+  const chip = el('<div class="proc-chip" style="background:' + c.bg + ';color:' + c.fg + ';border-color:' + c.border + '"><div class="chip-icon">' + (iconId ? X32Icons.svg(iconId, 26) : '') + '</div><b>' + esc(nameV || strip.label) + '</b><span>' + esc(strip.label) + '</span></div>');
   const tabs = el('<div class="proc-tabs"></div>');
   const tabEq = el('<button class="proc-tab">EQ</button>');
   const tabDyn = el('<button class="proc-tab">Kompressor</button>');
   tabEq.addEventListener('click', () => setTab('eq'));
   tabDyn.addEventListener('click', () => setTab('dyn'));
-  tabs.appendChild(tabEq); tabs.appendChild(tabDyn);
+  tabs.appendChild(tabEq);
+  if(strip.dyn) tabs.appendChild(tabDyn);
   const closeBtn = el('<button class="close-btn">&times;</button>');
   closeBtn.addEventListener('click', closeDetail);
   head.appendChild(chip); head.appendChild(tabs); head.appendChild(closeBtn);
@@ -826,25 +825,28 @@ function openDetail(ch){
   window.addEventListener('keydown', proc.onKey);
 
   document.body.appendChild(overlay);
+
+  // Werte holen (frisch), regelmäßig nachgleichen, Änderungen live anzeigen
+  const paths = V.detailPaths(strip);
+  X.want(paths);
+  X.refresh(paths, true);
+  X.setHotGroup('detail', paths);
+  if(strip.type === 'ch') X.setMeters(['0', '1', '2']);
+  proc.unsub = X.subscribe(strip.base + '/', () => { pullFromStore(); refreshEq(); refreshDyn(); });
+
   setTab('eq');
+  pullFromStore();
   refreshEq();
   refreshDyn();
-  window.x32API.selectChannel(ch);
 }
 
 function closeDetail(){
   if(!proc) return;
   window.removeEventListener('resize', proc.onResize);
   window.removeEventListener('keydown', proc.onKey);
+  proc.unsub();
   proc.overlay.remove();
   proc = null;
+  X.setHotGroup('detail', []);
+  X.setMeters(['0', '2']);
 }
-
-window.x32API.onChannelDetail((data) => {
-  if(!proc || data.ch !== proc.ch || proc.busy > 0) return;
-  data.eq.forEach((b, i) => Object.assign(proc.eq[i], b));
-  Object.assign(proc.misc, data.misc);
-  Object.assign(proc.dyn, data.dyn);
-  refreshEq();
-  refreshDyn();
-});

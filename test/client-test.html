@@ -1,0 +1,140 @@
+<!DOCTYPE html><html><body><pre id="out"></pre>
+<script src="../shared/osc.js"></script>
+<script src="../shared/values.js"></script>
+<script src="../shared/client.js"></script>
+<script src="mock-console.js"></script>
+<script>
+const out = []; let fails = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FEHLER') + ' ' + name + (detail !== undefined ? '  ' + detail : '')); }
+const strips = X32V.buildStrips();
+const basicPaths = strips.flatMap((s) => X32V.basicPaths(s));
+
+function makeRig(opts) {
+  opts = opts || {};
+  const events = { batches: [], meters: {}, statuses: [] };
+  let client, mock;
+  mock = new MockX32({ deliver: (u8) => client.receive(u8), latency: opts.latency == null ? 2 : opts.latency, loss: opts.loss || 0 });
+  client = new X32Client({
+    send: (u8) => mock.receive(u8),
+    onBatch: (e) => events.batches.push(...e),
+    onMeter: (id, f) => { (events.meters[id] = events.meters[id] || []).push(f.length); },
+    onStatus: (s) => events.statuses.push(s.state),
+  });
+  let maxInflight = 0;
+  const origTransmit = client.transmit.bind(client);
+  client.transmit = (a, b) => { origTransmit(a, b); if (client.inflight.size > maxInflight) maxInflight = client.inflight.size; };
+  return { client, mock, events, maxInflight: () => maxInflight };
+}
+async function waitFor(fn, timeout) { const t0 = Date.now(); while (Date.now() - t0 < timeout) { if (fn()) return true; await sleep(20); } return false; }
+
+(async () => {
+  // T1: Handshake
+  let r = makeRig();
+  r.client.start();
+  const online = await waitFor(() => r.client.state === 'online', 3000);
+  check('T1 Handshake: online', online, 'Modell ' + (r.client.info && r.client.info.model) + ', RTT ' + (r.client.rtt && r.client.rtt.toFixed(1)) + ' ms');
+
+  // T2: Erst-Abgleich aller Kanäle (Name, Farbe, Icon, Fader, Mute)
+  const t0 = Date.now();
+  r.client.want(basicPaths);
+  const synced = await waitFor(() => r.client.queue.length === 0 && r.client.inflight.size === 0, 8000);
+  const dur = Date.now() - t0;
+  check('T2 Abgleich ' + basicPaths.length + ' Werte', synced && r.client.values.size >= basicPaths.length, 'geladen ' + r.client.values.size + ' in ' + dur + ' ms, Wiederholungen ' + r.client.stats.retries);
+  check('T2 Anfrage-Fenster nie über 20', r.maxInflight() <= 20, 'Maximum ' + r.maxInflight());
+  check('T2 Werte korrekt (Ch 05 Name)', r.client.get('/ch/05/config/name') === 'Ch 05', r.client.get('/ch/05/config/name'));
+
+  // T3: schnelle Fader-Bewegung wird gebündelt, letzter Wert kommt an
+  const path = '/ch/01/mix/fader';
+  const before = (r.mock.log.sets.get(path) || { count: 0 }).count;
+  const tw0 = Date.now();
+  for (let i = 1; i <= 200; i++) { r.client.set(path, 'f', i / 200); await sleep(2.5); }
+  const elapsed = Date.now() - tw0;
+  await sleep(700);
+  const rec = r.mock.log.sets.get(path);
+  const sent = rec.count - before, maxExpected = Math.ceil(elapsed / 12) + 6;
+  check('T3 Schreiben gebündelt (max. ~80/s)', sent <= maxExpected && sent >= 20, sent + ' Pakete für 200 Bewegungen in ' + elapsed + ' ms (erlaubt bis ' + maxExpected + ')');
+  check('T3 Endwert am Pult korrekt', Math.abs(rec.last - 1) < 1e-6, 'Pult ' + rec.last);
+  check('T3 Kontroll-Lesen ohne Korrektur (Wert unverändert)', r.client.get(path) === 1 && r.client.pending.size === 0, 'pending ' + r.client.pending.size);
+
+  // T4: letztes Schreiben geht verloren -> wird erkannt und erneut gesendet
+  r.mock.dropNextSetOf = '/ch/02/mix/fader';
+  r.client.set('/ch/02/mix/fader', 'f', 0.4);
+  await sleep(1400);
+  check('T4 verlorenes Paket: Pult hat den Wert nach automatischem Neu-Senden', Math.abs(r.mock.store.get('/ch/02/mix/fader') - 0.4) < 1e-6, 'Pult ' + r.mock.store.get('/ch/02/mix/fader') + ', erneut gesendet: ' + r.client.stats.resends);
+
+  // T5: Änderung am Pult selbst kommt in der Oberfläche an
+  r.events.batches.length = 0;
+  r.mock.surfaceChange('/ch/03/mix/fader', 0.33);
+  const gotSurface = await waitFor(() => r.events.batches.some(([p, v]) => p === '/ch/03/mix/fader' && Math.abs(v - 0.33) < 1e-6), 500);
+  check('T5 Pult-Änderung erscheint per Batch', gotSurface);
+
+  // T6: eigene Änderungen werden NICHT als Änderung gemeldet (kein Echo-Effekt)
+  r.events.batches.length = 0;
+  r.client.set('/ch/04/mix/on', 'i', 0);
+  await sleep(500);
+  check('T6 eigene Änderung erzeugt keine Batch-Meldung', !r.events.batches.some(([p]) => p === '/ch/04/mix/on'), JSON.stringify(r.events.batches.filter(([p]) => p === '/ch/04/mix/on')));
+
+  // T7: Meter-Ströme
+  await sleep(300);
+  check('T7 Meter-Ströme 0 (70) und 2 (49) kommen an', (r.events.meters['0'] || []).every((n) => n === 70) && (r.events.meters['2'] || []).every((n) => n === 49) && (r.events.meters['0'] || []).length > 5, 'Pakete Strom0: ' + (r.events.meters['0'] || []).length + ', Strom2: ' + (r.events.meters['2'] || []).length);
+  r.client.setMeters(['0', '1', '2']);
+  await sleep(400);
+  check('T7 Zusatz-Strom 1 (96 Werte)', (r.events.meters['1'] || []).length > 3 && r.events.meters['1'][0] === 96);
+
+  // T8: Herzschlag hält das Abo am Leben (mehr als 10 s virtuelle Zeit)
+  await sleep(12000);
+  r.events.batches.length = 0;
+  r.mock.surfaceChange('/ch/06/mix/fader', 0.2);
+  const stillAlive = await waitFor(() => r.events.batches.some(([p]) => p === '/ch/06/mix/fader'), 500);
+  check('T8 nach 12 s noch Pult-Änderungen (Herzschlag)', stillAlive, 'xremote gesendet: ' + r.mock.log.xremote);
+
+  // T9: Ausfall und Wiederverbindung
+  r.mock.online = false;
+  const lost = await waitFor(() => r.client.state === 'lost', 8000);
+  check('T9 Ausfall erkannt', lost, r.client.state);
+  const offlineSet = r.client.set('/ch/07/mix/fader', 'f', 0.9);
+  check('T9 Schreiben im Ausfall wird abgelehnt', offlineSet === false);
+  r.mock.store.set('/ch/08/mix/fader', 0.11);      // Pult ändert sich während des Ausfalls
+  r.mock.online = true;
+  const back = await waitFor(() => r.client.state === 'online', 6000);
+  check('T9 wieder online', back);
+  const resynced = await waitFor(() => Math.abs((r.client.get('/ch/08/mix/fader') || 0) - 0.11) < 1e-6, 4000);
+  check('T9 Zustand nach Wiederverbindung neu abgeglichen', resynced, 'Wert ' + r.client.get('/ch/08/mix/fader'));
+  r.client.stop(); r.mock.shutdown();
+
+  // T10: schlechtes WLAN (25 % Paketverlust) – alles wird trotzdem geladen
+  r = makeRig({ loss: 0.25, latency: 4 });
+  r.client.start();
+  await waitFor(() => r.client.state === 'online', 8000);
+  const t1 = Date.now();
+  r.client.want(basicPaths);
+  const ok10 = await waitFor(() => basicPaths.every((p) => r.client.values.has(p)), 40000);
+  check('T10 25 % Paketverlust: Abgleich am Ende vollständig', ok10, 'fehlend ' + basicPaths.filter((p) => !r.client.values.has(p)).length + ', Wiederholungen ' + r.client.stats.retries + ', Dauer ' + (Date.now() - t1) + ' ms');
+  r.client.stop(); r.mock.shutdown();
+
+  // T11: Detail-Parameter (6-Band-EQ Bus, Kanal mit Gate/Dyn) laden
+  r = makeRig();
+  r.client.start(); await waitFor(() => r.client.state === 'online', 3000);
+  const bus = strips.find((s) => s.id === 'bus03'), ch = strips.find((s) => s.id === 'ch10');
+  const dp = X32V.detailPaths(bus).concat(X32V.detailPaths(ch));
+  r.client.want(dp);
+  await waitFor(() => r.client.queue.length === 0 && r.client.inflight.size === 0, 5000);
+  check('T11 Detail-Pfade (Bus 6-Band + Kanal) geladen', dp.every((p) => r.client.values.has(p)), dp.length + ' Pfade');
+  check('T11 Umrechnung Bus EQ-Band 6 Frequenz', Math.abs(X32V.fromWire('/bus/03/eq/6/f', r.client.get('/bus/03/eq/6/f')) - 14000) < 1, X32V.fromWire('/bus/03/eq/6/f', r.client.get('/bus/03/eq/6/f')).toFixed(0) + ' Hz');
+  r.client.stop(); r.mock.shutdown();
+
+  // T12: Pfad, auf den das Pult nie antwortet, wird nach 3 Runden aufgegeben (kein Dauer-Nachfragen)
+  r = makeRig();
+  r.client.start(); await waitFor(() => r.client.state === 'online', 3000);
+  r.client.want(['/ch/01/bogus/param']);
+  await waitFor(() => r.client.dead.has('/ch/01/bogus/param'), 40000);
+  const getsAfter = r.mock.log.gets;
+  await sleep(8000);
+  check('T12 unbeantwortete Anfrage wird nach mehreren Runden aufgegeben', r.client.dead.has('/ch/01/bogus/param') && r.mock.log.gets - getsAfter < 3, 'aufgegeben: ' + r.client.dead.size + ', weitere Anfragen danach: ' + (r.mock.log.gets - getsAfter));
+  r.client.stop(); r.mock.shutdown();
+
+  out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>
