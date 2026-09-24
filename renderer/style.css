@@ -342,3 +342,15 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .m-rta-card{padding-bottom:10px;}
 .m-rta-read{font-family:var(--font-mono);font-size:12px;color:var(--accent);margin-left:auto;}
 .m-rta{width:100%;height:240px;display:block;}
+
+/* Spitzenwert-Marke und Übersteuerungs-Lampe */
+.strip{position:relative;}
+.meter-peak{position:absolute;left:0;right:0;height:2px;background:#E7EBF0;box-shadow:0 0 3px rgba(255,255,255,0.5);pointer-events:none;top:100%;opacity:0;}
+.clip-led{position:absolute;top:8px;right:8px;width:9px;height:9px;padding:0;border-radius:50%;border:1px solid #4a2320;background:#2a1513;cursor:pointer;}
+.clip-led.on{background:#ff3b30;border-color:#ff7b72;box-shadow:0 0 8px 2px rgba(255,59,48,0.75);}
+
+/* Startbildschirm: Auto-Verbinden, Changelog */
+.auto-row{display:flex;align-items:center;gap:8px;margin-top:14px;font-size:12px;color:var(--text-dim);cursor:pointer;}
+.changelog-list{display:flex;flex-direction:column;gap:12px;}
+.changelog-item{display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.45;color:var(--text-dim);}
+.changelog-item b{color:var(--text);font-family:var(--font-head);font-size:13.5px;}

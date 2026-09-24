@@ -192,6 +192,30 @@ scanBtn.addEventListener('click', async () => {
   }
 });
 
+// ---------- Automatisch verbinden (beim Start) ----------
+// Sucht das Pult im Netzwerk. Genau eins gefunden (oder das zuletzt benutzte dabei) -> verbinden; mehrere -> Auswahl.
+const autoBox = document.getElementById('auto-connect');
+try { if(autoBox) autoBox.checked = localStorage.getItem('x32-auto') !== 'off'; } catch(e){}
+if(autoBox) autoBox.addEventListener('change', () => { try { localStorage.setItem('x32-auto', autoBox.checked ? 'on' : 'off'); } catch(e){} });
+async function autoConnect(){
+  if(autoBox && !autoBox.checked) return 'aus';
+  if(X.status().state !== 'idle') return 'schon verbunden';
+  const hintText = document.querySelector('#connect-hint .hint-title');
+  const oldText = hintText ? hintText.textContent : '';
+  if(hintText) hintText.textContent = 'Suche das Pult im Netzwerk…';
+  let results = [];
+  try { results = await window.x32API.scan(); } catch(e){}
+  if(hintText) hintText.textContent = oldText;
+  if(X.status().state !== 'idle') return 'schon verbunden';   // du warst schneller
+  let saved = '';
+  try { saved = localStorage.getItem('x32-ip') || ''; } catch(e){}
+  const known = results.find((r) => r.ip === saved);
+  if(known){ connectTo(known.ip); return 'verbunden'; }
+  if(results.length === 1){ connectTo(results[0].ip); return 'verbunden'; }
+  if(results.length > 1){ showConsolePicker(results); return 'auswahl'; }
+  return 'nichts gefunden';
+}
+
 // ================= Ebenen & Fader-Streifen =================
 let currentLayer = 'ch';
 let stripUI = {};
@@ -199,9 +223,15 @@ const dockUI = {};
 let unsubscribers = [];
 
 function buildStrip(strip){
-  const ui = { strip, iconId: null, tracks: [], fills: [] };
+  const ui = { strip, iconId: null, tracks: [], fills: [], peaks: [], peakEls: [], clipped: false };
   const wrap = el('<div class="strip"></div>');
   wrap.appendChild(el('<div class="strip-num">' + esc(strip.label) + '</div>'));
+  if(strip.meter){                                   // Übersteuerungs-Lampe: leuchtet, bis man sie anklickt
+    const clip = el('<button class="clip-led" title="Übersteuerung – Klick zum Zurücksetzen" aria-label="Übersteuerung zurücksetzen"></button>');
+    clip.addEventListener('click', (e) => { e.stopPropagation(); ui.clipped = false; clip.classList.remove('on'); });
+    wrap.appendChild(clip);
+    ui.clipEl = clip;
+  }
 
   const plate = el('<div class="strip-plate"></div>');
   const icon = el('<div class="strip-icon"></div>');
@@ -216,8 +246,12 @@ function buildStrip(strip){
     const track = el('<div class="meter-track"></div>');
     const fill = el('<div class="meter-fill" style="height:100%;"></div>');
     track.appendChild(fill);
+    const peak = el('<div class="meter-peak"></div>');   // hält den höchsten Pegel kurz fest
+    track.appendChild(peak);
     row.appendChild(track);
     ui.fills.push(fill);
+    ui.peakEls.push(peak);
+    ui.peaks.push({ v: 0, t: 0 });
   }
   const fader = makeFader();
   row.appendChild(fader);
@@ -333,12 +367,24 @@ function buildLayerTabs(){
   layerTabs.appendChild(m);
 }
 
-// Pegel auf die sichtbaren Streifen verteilen
+// Pegel auf die sichtbaren Streifen verteilen (mit Spitzenwert-Marke und Übersteuerungs-Lampe)
+const PEAK_HOLD_MS = 1200;
+const CLIP_LEVEL = 0.98;      // ca. -0,2 dBFS
 X.onMeter((id, floats) => {
   for(const ui of Object.values(stripUI).concat(Object.values(dockUI))){
     const m = ui.strip.meter;
     if(!m || m.stream !== id) continue;
-    m.idx.forEach((idx, i) => { if(ui.fills[i] && idx < floats.length) ui.fills[i].style.height = (100 - levelToPct(floats[idx])).toFixed(0) + '%'; });
+    m.idx.forEach((idx, i) => {
+      if(!ui.fills[i] || idx >= floats.length) return;
+      const v = floats[idx];
+      ui.fills[i].style.height = (100 - levelToPct(v)).toFixed(0) + '%';
+      const p = ui.peaks[i];
+      if(v >= p.v){ p.v = v; p.t = performance.now(); }
+      else if(performance.now() - p.t > PEAK_HOLD_MS) p.v = Math.max(v, p.v * 0.9);
+      ui.peakEls[i].style.top = (100 - levelToPct(p.v)).toFixed(0) + '%';
+      ui.peakEls[i].style.opacity = p.v > 0.002 ? '1' : '0';
+      if(v >= CLIP_LEVEL && !ui.clipped){ ui.clipped = true; ui.clipEl.classList.add('on'); }
+    });
   }
   if(typeof processingMeters === 'function') processingMeters(id, floats);
 });
@@ -363,10 +409,11 @@ window.x32API.onUpdateError((msg) => {
   if(updateBar) updateBar.querySelector('#update-text').textContent = 'Update fehlgeschlagen: ' + msg;
   toast('Update fehlgeschlagen: ' + msg, true);
 });
-window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; });
+window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; if(!window.__noAutoConnect) maybeShowChangelog(v); });
 
 // ================= Start =================
 buildLayerTabs();
 buildDock();
 setLayer('ch');
+if(!window.__noAutoConnect) setTimeout(autoConnect, 300);
 X.loadSnapshot().then(() => { STRIPS.forEach((s) => { if(stripUI[s.id]) paintStrip(stripUI[s.id]); }); });

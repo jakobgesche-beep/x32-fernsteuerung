@@ -5,17 +5,18 @@
 <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div></div></header>
 <nav id="layer-tabs" class="layer-tabs"></nav>
 <div id="console" class="console offline"><main id="app" class="app"></main><aside id="dock" class="dock"></aside>
-<div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p>Mac und X32 müssen im selben Netzwerk sein.</p><button id="hint-scan-btn" class="btn">Pult suchen</button></div></div>
+<div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p>Mac und X32 müssen im selben Netzwerk sein.</p><button id="hint-scan-btn" class="btn">Pult suchen</button><label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label></div></div>
 <section id="measure" class="measure" hidden></section>
 <pre id="out" style="display:none"></pre>
 <script src="../shared/osc.js"></script>
 <script src="../shared/values.js"></script>
 <script src="../shared/client.js"></script>
 <script src="mock-console.js"></script>
+<script>window.__noAutoConnect = true;</script>
 <script>
 // Brücke wie im Hauptprozess: echte Verbindungsschicht + simuliertes Pult, statt UDP im Speicher verbunden
 const cbs = {}; let client = null, mock = null;
-window.__ctl = { get client(){ return client; }, get mock(){ return mock; } };
+window.__ctl = { get client(){ return client; }, get mock(){ return mock; }, emitMeter: (id, f) => cbs.meter && cbs.meter(id, f) };
 window.x32API = {
   scan: async () => [],
   connect: async () => {
@@ -49,6 +50,7 @@ window.x32API = {
 <script src="../renderer/fader.js"></script>
 <script src="../shared/spl.js"></script>
 <script src="../renderer/measure.js"></script>
+<script src="../renderer/changelog.js"></script>
 <script src="../renderer/app.js"></script>
 <script src="../renderer/processing.js"></script>
 <script src="e2e-scenario.js"></script>

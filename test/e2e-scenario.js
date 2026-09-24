@@ -37,8 +37,26 @@ window.__mockInit = (mock) => {
 (async () => {
   if(params.get('view') === 'offline'){ return; }
   const wasOffline = document.getElementById('console').classList.contains('offline');
-  document.getElementById('ip-input').value = '10.0.0.5';
-  document.getElementById('connect-btn').click();
+  const autoResults = [];
+  if(params.get('test')){
+    // Automatisch verbinden: aus / nichts gefunden / mehrere / genau eins
+    const box = document.getElementById('auto-connect') || (() => { const c = document.createElement('input'); c.type = 'checkbox'; c.id = 'auto-connect'; document.body.appendChild(c); return c; })();
+    autoResults.push(['aus', box.checked = false, await autoConnect()]);
+    box.checked = true;
+    window.x32API.scan = async () => [];
+    autoResults.push(['leer', null, await autoConnect()]);
+    window.x32API.scan = async () => [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }, { ip: '10.0.0.6', model: 'X32', name: 'FOH' }];
+    autoResults.push(['mehrere', null, await autoConnect()]);
+    const pickerShown = !!document.querySelector('.scan-row');
+    document.querySelectorAll('.overlay').forEach((o) => o.remove());
+    check('Auto-Verbinden: aus = nichts tun, kein Pult = Hinweis, mehrere = Auswahl', autoResults[0][2] === 'aus' && autoResults[1][2] === 'nichts gefunden' && autoResults[2][2] === 'auswahl' && pickerShown, JSON.stringify(autoResults.map((r) => r[2])));
+    window.x32API.scan = async () => [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }];
+    autoResults.push(['eins', null, await autoConnect()]);
+    check('Auto-Verbinden: genau ein Pult gefunden = verbindet selbst', autoResults[3][2] === 'verbunden' && document.getElementById('ip-input').value === '10.0.0.5', autoResults[3][2]);
+  } else {
+    document.getElementById('ip-input').value = '10.0.0.5';
+    document.getElementById('connect-btn').click();
+  }
   const online = await waitFor(() => X.status().state === 'online' && X.status().progress >= 1, 10000);
   await sleep(200);
   const view = params.get('view') || 'ch';
@@ -254,6 +272,31 @@ window.__mockInit = (mock) => {
     openDetail(STRIP_BY_ID['aux1']); await sleep(200);
     check('Aux 1: nur EQ-Tab (kein Kompressor)', proc.els.tabDyn.parentElement === null);
     closeDetail();
+    // Spitzenwert-Marke und Übersteuerungs-Lampe
+    setLayer('ch'); await sleep(200);
+    const c1 = stripUI['ch01'], m1 = STRIP_BY_ID['ch01'].meter;
+    const frame = (v) => { const f = new Float32Array(70); f[m1.idx[0]] = v; __ctl.emitMeter(m1.stream, f); };
+    frame(0.5);
+    check('Meter: Spitzenwert-Marke sichtbar bei -6 dB (Mitte)', c1.peakEls[0].style.opacity === '1' && Math.abs(parseFloat(c1.peakEls[0].style.top) - (100 - levelToPct(0.5))) < 1.5, c1.peakEls[0].style.top);
+    check('Meter: bei normalem Pegel keine Übersteuerungs-Lampe', !c1.clipEl.classList.contains('on'));
+    frame(1.0);
+    check('Meter: Übersteuerung (0 dBFS) schaltet die rote Lampe an', c1.clipEl.classList.contains('on'));
+    frame(0.1); frame(0.1);
+    check('Meter: Lampe bleibt an, Spitzenwert-Marke bleibt kurz oben', c1.clipEl.classList.contains('on') && parseFloat(c1.peakEls[0].style.top) < 5, c1.peakEls[0].style.top);
+    c1.clipEl.click();
+    check('Meter: Klick auf die Lampe setzt sie zurück', !c1.clipEl.classList.contains('on') && !c1.clipped);
+    check('Meter: Kanalzüge ohne Meter (DCA) haben keine Lampe', !STRIP_BY_ID['dca1'].meter);
+
+    // "Neu in dieser Version"
+    try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
+    maybeShowChangelog('2.5.0');
+    const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 4;
+    document.getElementById('changelog-overlay').querySelector('button').click();
+    maybeShowChangelog('2.5.0');
+    check('Neu-in-Version: erscheint einmal mit Liste, nach "Verstanden" nicht wieder', shown && !document.getElementById('changelog-overlay'));
+    maybeShowChangelog('9.9.9');
+    check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
+
     // Messung: eigener Reiter neben den Ebenen, funktioniert ohne Pult-Bedienung
     const mTab = document.querySelector('.layer-tab.measure-tab');
     check('Reiter "Messung" neben den Pult-Ebenen', !!mTab && mTab.textContent === 'Messung');
