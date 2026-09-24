@@ -57,3 +57,25 @@ body.touch .bank-btns{display:inline-flex;gap:6px;margin-left:8px;}
 body.touch .bank-btn{min-width:56px;font-size:24px;line-height:1;padding:6px 12px;}
 body.touch .eq-touchbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0 10px;color:var(--muted);font-size:13px;}
 body.touch .hint-touch{display:inline;} body.touch .hint-mouse{display:none;}
+
+/* Vollbild-Knopf nur im Touch-Modus */
+.full-btn{display:none;} body.touch .full-btn{display:inline-flex;}
+.reserve{display:none;}
+
+/* Geteiltes Layout auf breiten Bildschirmen: links das Mischpult (halbe Breite), rechts oben die Pegelanzeige,
+   rechts unten eine freie Fläche für später. Nichts wird eingeklappt oder verkleinert. */
+body.touch-split{overflow:hidden;}
+body.touch-split .workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,auto) minmax(110px,1fr);gap:14px;height:var(--workspace-h,80vh);padding:6px 16px 0;}
+body.touch-split #console{grid-column:1;grid-row:1 / span 2;max-width:none;margin:0;padding:0;min-width:0;min-height:0;overflow:hidden;}
+body.touch-split #app{min-width:0;overflow:hidden;}
+body.touch-split .strip-row{padding-bottom:6px;}
+body.touch-split #overview{grid-column:2;grid-row:1;max-width:none;margin:0;padding:0;min-height:0;overflow-y:auto;}
+body.touch-split .ov-bar{display:none;}
+body.touch-split .overview.collapsed .ov-grid{display:grid;}
+body.touch-split .ov-grid{grid-template-columns:minmax(0,1fr);gap:12px;}
+body.touch-split .lp-body{grid-template-columns:minmax(0,1fr);gap:10px;}
+body.touch-split .m-value{font-size:58px;}
+body.touch-split .m-rta,body.touch-split .m-hist{height:104px;}
+body.touch-split .ov-side{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;}
+body.touch-split .ov-glance{margin-top:0;padding-top:0;border-top:none;}
+body.touch-split #reserve{display:flex;grid-column:2;grid-row:2;align-items:center;justify-content:center;min-height:0;border:1px dashed var(--line);border-radius:var(--radius-m,8px);color:var(--muted);font-size:13px;opacity:0.7;}

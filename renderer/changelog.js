@@ -1,5 +1,13 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.9.0': {
+    title: 'Neu in Version 2.9.0',
+    items: [
+      ['Touch-Modus: nichts verschwindet mehr', 'Die Übersicht klappt nicht mehr von selbst ein. Es wird nichts kleiner, nur größer.'],
+      ['Geteilter Bildschirm für große Monitore', 'Ab etwa 1500 Pixel Breite (z. B. 27-Zoll-Touch-Monitor): links das Mischpult (halbe Breite), rechts oben die Pegelanzeige mit Live-Pegel, Main-Pegel und „Auf einen Blick“, rechts unten eine freie Fläche für später.'],
+      ['Vollbild-Knopf', 'Im Touch-Modus steht oben „Vollbild“, damit man ohne Tastatur den ganzen Monitor nutzen kann.'],
+    ],
+  },
   '2.8.0': {
     title: 'Neu in Version 2.8.0',
     items: [

@@ -226,10 +226,14 @@ Startwert abweichen) oder Verwerfen.
 
 Knopf **Touch** in der Kopfzeile (`renderer/touch.css`, Klasse `touch` am `<body>`; schaltet sich beim ersten echten Fingertipp
 oder auf Touch-Geräten selbst ein, gemerkt unter `x32-touch`): Bedienelemente mindestens 44 px, breite Fader mit großer Kappe, die
-Fader nutzen die Fensterhöhe (`--fader-h`, Übersicht klappt dafür automatisch ein), Bank-Tasten ‹ › zum Blättern, größere
+Fader nutzen die Fensterhöhe (`--fader-h`), es wird nichts eingeklappt, Bank-Tasten ‹ › zum Blättern, größere
 EQ-Griffe mit Tasten für Güte und Gain, kein Zoomen mit zwei Fingern, kein Kontextmenü bei langem Drücken.
 Fader (`renderer/fader.js`): mehrere Finger gleichzeitig (jeder Fader merkt sich seinen Finger), Wert-Blase über der Kappe,
 Feineinstellung (1/5) mit Shift, Finger ruhig halten oder seitlich wegrücken, Doppeltippen/Doppelklick = 0 dB.
+**Geteiltes Layout** auf breiten Bildschirmen (ab 1500 px Fensterbreite, Klasse `touch-split`, Container `#workspace`): links das
+Mischpult (halbe Breite, Fader in voller Höhe), rechts oben die Pegelanzeige (Live-Pegel, Main LR, Auf einen Blick; nimmt so viel Höhe,
+wie sie braucht), rechts unten eine freie Fläche (`#reserve`, für spätere Bedienelemente). Schmalere Fenster stapeln wie sonst.
+**Vollbild**-Knopf im Touch-Modus.
 Hinweis: macOS liefert die Berührungen eines externen Touch-Monitors oft nur als Mausklicks (ein Finger, keine Multi-Touch-Ereignisse);
 dann bleibt alles einzeln bedienbar, und der Knopf "Touch" schaltet die großen Bedienelemente von Hand ein.
 

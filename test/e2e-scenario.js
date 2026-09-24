@@ -317,10 +317,10 @@ window.__mockInit = (mock) => {
 
     // "Neu in dieser Version"
     try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
-    maybeShowChangelog('2.8.0');
+    maybeShowChangelog('2.9.0');
     const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 3;
     document.getElementById('changelog-overlay').querySelector('button').click();
-    maybeShowChangelog('2.8.0');
+    maybeShowChangelog('2.9.0');
     check('Neu-in-Version: erscheint einmal mit Liste, nach "Verstanden" nicht wieder', shown && !document.getElementById('changelog-overlay'));
     maybeShowChangelog('9.9.9');
     check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
@@ -477,7 +477,7 @@ window.__mockInit = (mock) => {
     const normalCapW = stripUI['ch01'].fader.capElement.getBoundingClientRect().width;
     tb.click(); await sleep(400);
     const cs = (sel) => getComputedStyle(document.querySelector(sel));
-    check('Touch: Modus an, Zustand gemerkt, Übersicht automatisch eingeklappt (mehr Platz)', document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === 'on' && /an/.test(tb.textContent) && document.getElementById('overview').classList.contains('collapsed'));
+    check('Touch: Modus an, Zustand gemerkt, es verschwindet nichts (Übersicht bleibt offen und sichtbar)', document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === 'on' && /an/.test(tb.textContent) && !document.getElementById('overview').classList.contains('collapsed') && document.getElementById('overview').getBoundingClientRect().height > 100 && !!document.querySelector('#overview .ov-main') && document.querySelector('#overview .ov-main').getBoundingClientRect().height > 20);
     const capW = stripUI['ch01'].fader.capElement.getBoundingClientRect().width;
     check('Touch: große Ziele (Mute ≥ 48 px, Reiter ≥ 44 px, Fader-Kappe ≥ 56 px breit statt ' + Math.round(normalCapW) + ')', parseFloat(cs('.mute-btn').height) >= 48 && parseFloat(cs('.layer-tab').height) >= 44 && capW >= 56, 'Mute ' + cs('.mute-btn').height + ', Reiter ' + cs('.layer-tab').height + ', Kappe ' + Math.round(capW));
     const fh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fader-h'));
@@ -554,9 +554,41 @@ window.__mockInit = (mock) => {
     check('Touch: EQ Güte + / − ändern die Güte des gewählten Bands, "Gain 0 dB" setzt es zurück', q1 > q0 * 1.15 && Math.abs(X.actual('/ch/02/eq/2/q') - q0) < q0 * 0.02 && Math.abs(X.actual('/ch/02/eq/2/g')) < 0.01, q0.toFixed(2) + ' -> ' + q1.toFixed(2));
     closeDetail(); await sleep(100);
 
+    // Geteiltes Layout für breite Bildschirme: links Mischpult (halbe Breite), rechts oben Pegelanzeige, rechts unten frei
+    {
+      const R = (id) => document.getElementById(id).getBoundingClientRect();
+      check('Touch: bei schmalem Fenster kein geteiltes Layout, Reserve-Fläche unsichtbar', !document.body.classList.contains('touch-split') && getComputedStyle(document.getElementById('reserve')).display === 'none');
+      window.__splitMinWidth = 1000; fitFaders(); await sleep(400);
+      const ws = R('workspace'), cn = R('console'), ov = R('overview'), rs = R('reserve');
+      check('Touch geteilt: Mischpult links (halbe Breite), Pegelanzeige rechts oben, freie Fläche rechts unten', document.body.classList.contains('touch-split') && Math.abs(cn.width - (ws.width - 46) / 2) < 20 && cn.left < ov.left && ov.left >= cn.right - 2 && Math.abs(rs.left - ov.left) < 2 && rs.top >= ov.bottom - 2 && rs.top > ov.top + 100 && cn.height > ws.height - 16, 'Konsole ' + Math.round(cn.width) + 'x' + Math.round(cn.height) + ', Übersicht ' + Math.round(ov.width) + 'x' + Math.round(ov.height) + ' @' + Math.round(ov.left) + ', Reserve @' + Math.round(rs.left) + ',' + Math.round(rs.top));
+      check('Touch geteilt: freie Fläche ist sichtbar und leer (nur Hinweis "Freie Fläche")', getComputedStyle(document.getElementById('reserve')).display !== 'none' && rs.height > 100 && document.getElementById('reserve').textContent.trim() === 'Freie Fläche');
+      const strips = Array.from(app.querySelectorAll('.strip')).filter((st) => st.getBoundingClientRect().left < cn.right && st.getBoundingClientRect().right > cn.left);
+      check('Touch geteilt: Kanalzüge bleiben in der linken Hälfte, Main/Mono-Dock daneben, alles in voller Touch-Größe', strips.length >= 2 && strips.every((st) => st.getBoundingClientRect().left >= cn.left - 1) && Math.round(getComputedStyle(document.querySelector('.strip')).flexBasis === '134px' || document.querySelector('.strip').offsetWidth >= 130) && document.querySelector('#dock .strip').getBoundingClientRect().right <= cn.right + 1);
+      check('Touch geteilt: Übersicht komplett da (Live-Pegel, Main LR, Auf einen Blick) und nichts eingeklappt', !!document.getElementById('m-start') && document.querySelector('#overview .ov-main').getBoundingClientRect().height > 20 && document.querySelector('#overview .ov-glance').getBoundingClientRect().height > 20 && getComputedStyle(document.querySelector('#overview .ov-grid')).display === 'grid' && getComputedStyle(document.querySelector('#overview .ov-bar')).display === 'none');
+      check('Touch geteilt: Fader nutzen die Höhe der linken Hälfte', parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--fader-h')) >= 210 && app.querySelector('.strip').getBoundingClientRect().bottom <= cn.bottom + 1, getComputedStyle(document.documentElement).getPropertyValue('--fader-h'));
+      // auch wenn die Übersicht vorher von Hand eingeklappt war: im geteilten Layout bleibt sie sichtbar und lebt weiter
+      document.getElementById('overview').classList.add('collapsed'); fitFaders();
+      const mf = new Float32Array(70); mf[22] = 0.5; __ctl.emitMeter('2', mf); Overview.tick();
+      check('Touch geteilt: auch eine früher eingeklappte Übersicht bleibt sichtbar und zeigt Pegel (Main L -6,0)', document.querySelector('#overview .ov-main').getBoundingClientRect().height > 20 && document.querySelectorAll('#overview .ov-mrow b')[0].textContent === '-6.0');
+      document.getElementById('overview').classList.remove('collapsed');
+      // Vollbild-Knopf
+      check('Touch: Vollbild-Knopf ist sichtbar', getComputedStyle(document.getElementById('full-btn')).display !== 'none');
+      document.getElementById('full-btn').click(); await sleep(50);
+      check('Touch: Vollbild-Knopf ruft das Hauptprogramm', window.__fullCalls === 1);
+      // Ansichtswechsel: Werkzeuge nutzen die ganze Fläche
+      document.querySelector('.layer-tab[data-layer="tools"]').click(); await sleep(300);
+      check('Touch geteilt: Werkzeuge belegen den ganzen Bildschirm (kein Split, Reserve weg)', !document.body.classList.contains('touch-split') && document.getElementById('reserve').hidden && !document.getElementById('tools').hidden);
+      document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(400);
+      check('Touch geteilt: zurück zum Pult ist wieder geteilt', document.body.classList.contains('touch-split') && !document.getElementById('reserve').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on'));
+      setLayer('ch'); await sleep(200);
+      // Layout-Umschaltung mit der Fensterbreite
+      window.__splitMinWidth = 5000; fitFaders(); await sleep(200);
+      check('Touch: wird das Fenster zu schmal, wird wieder normal gestapelt (Übersicht über den Fadern)', !document.body.classList.contains('touch-split') && R('overview').bottom <= R('console').top + 4);
+    }
+
     // Ausschalten und Selbst-Erkennung
     tb.click(); await sleep(300);
-    check('Touch: Knopf schaltet wieder aus (normale Größen, Höhe zurück, Übersicht wieder offen)', !document.body.classList.contains('touch') && localStorage.getItem('x32-touch') === 'off' && !document.documentElement.style.getPropertyValue('--fader-h') && !document.getElementById('overview').classList.contains('collapsed'));
+    check('Touch: Knopf schaltet wieder aus (normale Größen, Höhe zurück, Übersicht offen, kein geteiltes Layout)', !document.body.classList.contains('touch') && !document.body.classList.contains('touch-split') && localStorage.getItem('x32-touch') === 'off' && !document.documentElement.style.getPropertyValue('--fader-h') && !document.getElementById('overview').classList.contains('collapsed'));
     document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', pointerId: 60, bubbles: true }));
     check('Touch: ausdrücklich ausgeschaltet bleibt aus, auch wenn getippt wird', !document.body.classList.contains('touch'));
     try { localStorage.removeItem('x32-touch'); } catch(e){}
@@ -630,6 +662,7 @@ window.__mockInit = (mock) => {
   if(view === 'offlinemode'){ document.getElementById('connect-btn').click(); await waitFor(() => X.status().state === 'idle', 3000); await enterOffline(); X.setWire('/ch/01/mix/fader', 'f', 0.62); X.setWire('/ch/03/mix/on', 'i', 0); await sleep(700); }
   if(view === 'user'){ ['ch02', 'ch01', 'bus03', 'ch06', 'st'].forEach((i) => { if(i !== 'st') UserPage.add(i); }); setLayer('user'); await sleep(1500); }
   if(view === 'touch' || view === 'touch-eq'){ try { localStorage.removeItem('x32.overview.collapsed'); } catch(e){} document.getElementById('touch-btn').click(); await sleep(700); if(view === 'touch-eq'){ openDetail(STRIP_BY_ID['ch02']); await sleep(500); } }
+  if(view === 'split'){ window.__splitMinWidth = 1000; try { localStorage.removeItem('x32.overview.collapsed'); } catch(e){} document.getElementById('touch-btn').click(); await sleep(900); }
   if(view === 'tools') showView('tools');
   if(view === 'scenes'){ try { localStorage.removeItem('x32.scenes'); } catch(e){} Scenes.saveScene('Soundcheck', true); X.setWire('/ch/01/mix/fader', 'f', 0.3); Scenes.saveScene('Band A – Bühne', false); Scenes.open(); }
   if(view === 'clip'){ const m1 = STRIP_BY_ID['ch01'].meter, f = new Float32Array(70); f[m1.idx[0]] = 1.0; __ctl.emitMeter(m1.stream, f); f[m1.idx[0]] = 0.35; __ctl.emitMeter(m1.stream, f); }

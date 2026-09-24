@@ -16,6 +16,7 @@
       <span id="version-label" class="version-label"></span>
       <button id="design-btn" class="design-toggle" title="Design umschalten">Design: Schlicht</button>
       <button id="touch-btn" class="design-toggle" title="Touch-Modus: große Bedienelemente für Touch-Monitor">Touch: aus</button>
+      <button id="full-btn" class="design-toggle full-btn" title="Vollbild ein/aus">Vollbild</button>
     </div>
     <div class="conn-row">
       <button id="rew-btn" class="btn secondary small" title="Messsoftware REW starten">REW öffnen</button>
@@ -28,6 +29,7 @@
   </header>
 
   <nav id="layer-tabs" class="layer-tabs"></nav>
+  <div id="workspace" class="workspace">
   <section id="overview" class="overview" aria-label="Übersicht"></section>
   <div id="console" class="console offline">
     <main id="app" class="app"></main>
@@ -39,6 +41,8 @@
       <button id="hint-offline-btn" class="btn secondary">Offline arbeiten</button>
       <label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label>
     </div>
+  </div>
+  <section id="reserve" class="reserve" aria-label="Freie Fläche"><span>Freie Fläche</span></section>
   </div>
 
   <section id="tools" class="tools" hidden aria-label="Werkzeuge"></section>

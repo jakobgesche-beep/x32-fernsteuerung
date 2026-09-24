@@ -1,12 +1,15 @@
 <!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
 <link rel="stylesheet" href="../renderer/style.css"><link rel="stylesheet" href="../renderer/design-plain.css"><link rel="stylesheet" href="../renderer/touch.css"></head><body class="plain">
-<header class="topbar"><div class="brand"><span class="brand-mark"></span><span class="brand-text">X32 <b>Fernsteuerung</b></span><span id="version-label" class="version-label"></span><button id="design-btn" class="design-toggle">Design: Schlicht</button><button id="touch-btn" class="design-toggle">Touch: aus</button></div>
+<header class="topbar"><div class="brand"><span class="brand-mark"></span><span class="brand-text">X32 <b>Fernsteuerung</b></span><span id="version-label" class="version-label"></span><button id="design-btn" class="design-toggle">Design: Schlicht</button><button id="touch-btn" class="design-toggle">Touch: aus</button><button id="full-btn" class="design-toggle full-btn">Vollbild</button></div>
 <div class="conn-row"><button id="rew-btn" class="btn secondary small">REW öffnen</button><button id="offline-btn" class="btn secondary small">Offline-Modus</button><button id="scan-btn" class="btn secondary small">Pult suchen</button><input id="ip-input" type="text" placeholder="192.168.0.64" /><button id="connect-btn" class="btn small">Verbinden</button>
 <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div></div></header>
 <nav id="layer-tabs" class="layer-tabs"></nav>
+<div id="workspace" class="workspace">
 <section id="overview" class="overview"></section>
 <div id="console" class="console offline"><main id="app" class="app"></main><aside id="dock" class="dock"></aside>
 <div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p>Mac und X32 müssen im selben Netzwerk sein.</p><button id="hint-scan-btn" class="btn">Pult suchen</button><button id="hint-offline-btn" class="btn secondary">Offline arbeiten</button><label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label></div></div>
+<section id="reserve" class="reserve"><span>Freie Fläche</span></section>
+</div>
 <section id="tools" class="tools" hidden></section>
 <pre id="out" style="display:none"></pre>
 <script src="../shared/osc.js"></script>
@@ -42,6 +45,7 @@ window.x32API = {
   onBatch: (cb) => { cbs.batch = cb; }, onMeter: (cb) => { cbs.meter = cb; }, onStatus: (cb) => { cbs.status = cb; }, onLog: () => {},
   micStatus: async () => 'denied', micRequest: async () => 'denied', openMicSettings: async () => true,
   rewStatus: async () => ({ found: false, path: null }), rewOpen: async () => ({ ok: false, notFound: true }), rewChoose: async () => ({ ok: false, canceled: true }), rewDownload: async () => true,
+  toggleFullscreen: async () => { window.__fullCalls = (window.__fullCalls || 0) + 1; return true; },
   getVersion: async () => '2.0.0', installUpdate: async () => ({ ok: true }),
   onUpdateAvailable: () => {}, onUpdateProgress: () => {}, onUpdateError: () => {},
 };

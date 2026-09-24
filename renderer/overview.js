@@ -35,7 +35,6 @@ const Overview = (function () {
     bar.querySelector('.ov-toggle').addEventListener('click', () => {
       const c = root.classList.toggle('collapsed');
       try { localStorage.setItem('x32.overview.collapsed', c ? '1' : '0'); } catch (e) {}
-      autoCollapsedOverview = false;
       setTimeout(() => { if (!c) Measure.redraw(); if (typeof fitFaders === 'function') fitFaders(); }, 0);
     });
     try { if (localStorage.getItem('x32.overview.collapsed') === '1') root.classList.add('collapsed'); } catch (e) {}
@@ -65,7 +64,7 @@ const Overview = (function () {
   }
 
   function tick() {
-    if (!built || root.hidden || root.classList.contains('collapsed')) return;
+    if (!built || root.hidden || (root.classList.contains('collapsed') && !document.body.classList.contains('touch-split'))) return;
     const st = METER_STATE.st;
     ['0', '1'].forEach((i) => {
       const k = +i, v = st ? st.last[k] || 0 : 0, pk = st ? st.peaks[k].v : 0;

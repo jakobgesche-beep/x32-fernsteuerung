@@ -210,6 +210,12 @@ ipcMain.handle("save-text-file", async (event, name, text) => {
   try { fs.writeFileSync(res.filePath, "\ufeff" + text, "utf8"); return { ok: true, path: res.filePath }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
+// Vollbild ein/aus (für den Touch-Monitor ohne Tastatur)
+ipcMain.handle("toggle-fullscreen", async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  return mainWindow.isFullScreen();
+});
 ipcMain.handle("rew-download", async () => { await shell.openExternal("https://www.roomeqwizard.com/"); return true; });
 
 function createWindow() {

@@ -372,9 +372,11 @@ function showView(view){
   currentView = view;
   document.getElementById('console').hidden = view !== 'console';
   document.getElementById('tools').hidden = view !== 'tools';
+  document.getElementById('reserve').hidden = view !== 'console';
   if(view === 'console'){ Overview.show(); Measure.show(); } else { Overview.hide(); Measure.hide(); }
   layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === (view === 'console' ? currentLayer : view)));
   if(view === 'tools'){ if(typeof closeDetail === 'function') closeDetail(); Tools.init(document.getElementById('tools')); }
+  if(typeof fitFaders === 'function') fitFaders();
 }
 
 // Änderungen eines Kanalzugs: Name/Fader/Mute sofort, EQ/Kompressor gebündelt für die Mini-Anzeige
@@ -547,33 +549,39 @@ try { applyDesign(localStorage.getItem('x32-design') === 'classic' ? 'classic' :
 
 // ---------- Touch-Modus (Touch-Monitor): große Bedienelemente, hohe Fader, Bank-Tasten ----------
 const touchBtn = document.getElementById('touch-btn');
-let autoCollapsedOverview = false;
 // Fader so hoch machen, wie der Bildschirm hergibt (mehr Weg = genauer)
+// Geteiltes Touch-Layout (breite Bildschirme, z. B. 27-Zoll-Monitor): links das Mischpult, rechts oben die Pegelanzeige, rechts unten frei
+function updateSplit(){
+  const ws = document.getElementById('workspace');
+  const on = document.body.classList.contains('touch') && window.innerWidth >= (window.__splitMinWidth || 1500) && currentView === 'console';
+  document.body.classList.toggle('touch-split', on);
+  if(on){
+    const top = ws.getBoundingClientRect().top + window.scrollY;
+    ws.style.setProperty('--workspace-h', Math.max(420, window.innerHeight - top - 12) + 'px');
+  } else ws.style.removeProperty('--workspace-h');
+}
 function fitFaders(){
   const rootEl = document.documentElement;
   rootEl.style.removeProperty('--fader-h');
+  updateSplit();
   if(!document.body.classList.contains('touch')) return;
   const strip = app.querySelector('.strip') || document.querySelector('#dock .strip');
   const fader = strip && strip.querySelector('.fader');
   if(!strip || !fader) return;
   const nonFader = strip.offsetHeight - fader.offsetHeight;
   const docTop = strip.getBoundingClientRect().top + window.scrollY;
-  rootEl.style.setProperty('--fader-h', Math.max(210, Math.min(560, Math.floor(window.innerHeight - docTop - nonFader - 26))) + 'px');
+  rootEl.style.setProperty('--fader-h', Math.max(210, Math.min(document.body.classList.contains('touch-split') ? 900 : 560, Math.floor(window.innerHeight - docTop - nonFader - 26))) + 'px');
 }
 function applyTouch(on, persist){
   document.body.classList.toggle('touch', on);
   touchBtn.textContent = on ? 'Touch: an' : 'Touch: aus';
   touchBtn.classList.toggle('on', on);
   if(persist){ try { localStorage.setItem('x32-touch', on ? 'on' : 'off'); } catch(e){} }
-  const ov = document.getElementById('overview');
-  if(on){
-    let chosen = null; try { chosen = localStorage.getItem('x32.overview.collapsed'); } catch(e){}
-    if(chosen === null && !ov.classList.contains('collapsed')){ ov.classList.add('collapsed'); autoCollapsedOverview = true; }   // mehr Platz für die Fader
-  } else if(autoCollapsedOverview){ ov.classList.remove('collapsed'); autoCollapsedOverview = false; }
   fitFaders();                                       // sofort messen (erzwingt das Layout), danach noch einmal nach dem Zeichnen
   requestAnimationFrame(() => { fitFaders(); Minis.redrawAll(); Measure.redraw(); });
 }
 touchBtn.addEventListener('click', () => applyTouch(!document.body.classList.contains('touch'), true));
+document.getElementById('full-btn').addEventListener('click', () => { if(window.x32API.toggleFullscreen) window.x32API.toggleFullscreen(); });
 window.addEventListener('resize', () => fitFaders());
 // Bank-Tasten: die Kanalzug-Reihe um etwa eine Bildschirmbreite weiterblättern
 function bankScroll(dir){

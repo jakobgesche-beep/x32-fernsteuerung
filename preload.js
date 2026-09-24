@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("x32API", {
   rewOpen: () => ipcRenderer.invoke("rew-open"),
   rewChoose: () => ipcRenderer.invoke("rew-choose"),
   rewDownload: () => ipcRenderer.invoke("rew-download"),
+  toggleFullscreen: () => ipcRenderer.invoke("toggle-fullscreen"),
   saveTextFile: (name, text) => ipcRenderer.invoke("save-text-file", name, text),
   // Updates
   getVersion: () => ipcRenderer.invoke("get-version"),
