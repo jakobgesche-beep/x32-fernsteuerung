@@ -22,7 +22,6 @@ body.plain{
 .plain .topbar{background:var(--bg);border-bottom:1px solid var(--line);padding:10px 16px;}
 .plain .brand{text-transform:none;font-size:14px;font-weight:600;letter-spacing:0;}
 .plain .brand b{color:var(--text);font-weight:600;}
-.plain .brand-mark{width:12px;height:12px;border-radius:3px;background:var(--accent);box-shadow:none;}
 .plain .version-label{color:var(--muted);}
 .plain .layer-tabs{gap:2px;padding:8px 16px 0;border-bottom:1px solid var(--line);max-width:none;margin:0;}
 .plain .layer-tab{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;color:var(--muted);font-family:var(--font-body);font-size:13px;letter-spacing:0;padding:8px 12px;margin-bottom:-1px;}

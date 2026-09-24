@@ -222,6 +222,12 @@ Startwert abweichen) oder Verwerfen.
   Bus, Matrix, DCA) in eigener Reihenfolge. Stern am Kanalzug oder Fenster "Bearbeiten" (mit Suche und "nur benannte").
   Auswahl und zuletzt benutzte Ebene liegen im lokalen Speicher.
 
+## App-Icon
+
+Quelle `build/icon.svg` (drei Fader auf dunklem Grund, ein Knopf blau). `build/icon.png` (1024 px, mit transparenten Ecken) und
+`build/icon.icns` entstehen daraus (Chrome headless -> `sips` -> `iconutil`); electron-builder nimmt `build/icon.icns`
+(`mac.icon` in package.json). Dasselbe Zeichen steht klein in der Kopfzeile der App.
+
 ## Design (Version 2.7)
 
 Standard ist **Schlicht** (`renderer/design-plain.css`, Klasse `plain` am `<body>`): flach, neutrale Grautöne, Systemschrift,
