@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, session, systemPreferences, dialog } = require("electron");
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -8,6 +8,7 @@ const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 const OSC = require("./shared/osc");
 const X32Client = require("./shared/client");
+const REW = require("./shared/rew");
 
 const X32_PORT = 10023;
 
@@ -136,6 +137,71 @@ ipcMain.on("x32-refresh", (event, paths, urgent) => { if (client && validPaths(p
 ipcMain.on("x32-meters", (event, streams) => {
   if (client && Array.isArray(streams) && streams.every((x) => /^[0-9]+(:[0-9]+)?$/.test(String(x)))) client.setMeters(streams.map(String));
 });
+
+// ---------- Messung: Mikrofon-Zugriff und REW ----------
+// Mikrofon (nur Audio, nur für unser eigenes Fenster). Kamera wird nie freigegeben.
+function trustedContents(wc) { return !!mainWindow && !mainWindow.isDestroyed() && wc === mainWindow.webContents; }
+function setupMediaPermissions() {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    const types = (details && details.mediaTypes) || [];
+    callback(permission === "media" && trustedContents(wc) && !types.includes("video"));
+  });
+  ses.setPermissionCheckHandler((wc, permission, origin, details) => {
+    const types = (details && details.mediaType) ? [details.mediaType] : [];
+    return permission === "media" && (wc === null || trustedContents(wc)) && !types.includes("video");
+  });
+}
+function micStatus() {
+  return process.platform === "darwin" ? systemPreferences.getMediaAccessStatus("microphone") : "granted";
+}
+ipcMain.handle("mic-status", async () => micStatus());
+// fragt bei "noch nicht entschieden" den macOS-Dialog an, liefert danach den Status
+ipcMain.handle("mic-request", async () => {
+  if (process.platform === "darwin" && micStatus() === "not-determined") {
+    try { await systemPreferences.askForMediaAccess("microphone"); } catch (e) { log("Mikrofon-Anfrage fehlgeschlagen: " + e.message); }
+  }
+  return micStatus();
+});
+ipcMain.handle("mic-open-settings", async () => {
+  await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+  return true;
+});
+
+const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
+function readSettings() { try { return JSON.parse(fs.readFileSync(settingsFile(), "utf8")); } catch (e) { return {}; } }
+function writeSettings(patch) {
+  try { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify({ ...readSettings(), ...patch })); } catch (e) { log("Einstellungen nicht gespeichert: " + e.message); }
+}
+function findRew() {
+  return REW.findRew({
+    saved: readSettings().rewPath,
+    home: os.homedir(),
+    exists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (e) { return false; } },
+    list: (d) => { try { return fs.readdirSync(d); } catch (e) { return []; } },
+  });
+}
+ipcMain.handle("rew-status", async () => { const r = findRew(); return { found: !!r, path: r ? r.path : null }; });
+ipcMain.handle("rew-open", async () => {
+  const r = findRew();
+  if (!r) return { ok: false, notFound: true };
+  const err = await shell.openPath(r.path);            // startet das Programm (leerer Text = geklappt)
+  return err ? { ok: false, error: err } : { ok: true, path: r.path };
+});
+// Programm von Hand wählen, falls REW an einem anderen Ort liegt
+ipcMain.handle("rew-choose", async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: "REW auswählen", defaultPath: "/Applications", properties: ["openFile"], filters: [{ name: "Programme", extensions: ["app"] }],
+  });
+  if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+  const p = res.filePaths[0];
+  let isApp = false;
+  try { isApp = p.toLowerCase().endsWith(".app") && fs.statSync(p).isDirectory(); } catch (e) {}
+  if (!isApp) return { ok: false, error: "Das ist kein Programm (.app)." };
+  writeSettings({ rewPath: p });
+  return { ok: true, path: p };
+});
+ipcMain.handle("rew-download", async () => { await shell.openExternal("https://www.roomeqwizard.com/"); return true; });
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -280,6 +346,7 @@ ipcMain.handle("install-update", async () => {
 ipcMain.handle("get-version", async () => app.getVersion());
 
 app.whenReady().then(() => {
+  setupMediaPermissions();
   createWindow();
   checkForUpdate();
 });

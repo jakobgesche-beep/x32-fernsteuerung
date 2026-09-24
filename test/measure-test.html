@@ -1,0 +1,164 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../renderer/style.css">
+<style>body{padding:10px;} pre#out{display:none;}</style></head><body>
+<section id="measure" class="measure"></section>
+<pre id="out"></pre>
+<script>try { localStorage.clear(); } catch (e) {}</script>
+<script src="../shared/spl.js"></script>
+<script>
+// Messung, Ende zu Ende: echte Aufnahme-Kette (getUserMedia -> Web Audio -> Rechnung -> Anzeige) mit einem simulierten
+// Mikrofon (Chrome-Testgerät spielt eine WAV-Datei: links 1 kHz mit -23,0 dBFS, rechts 6 dB leiser).
+// Muss in Echtzeit laufen (nicht mit virtueller Zeit); der Server auf Port 8811 hält die Seite bis zum Ergebnis offen.
+window.__calls = [];
+window.x32API = {
+  micStatus: async () => 'granted', micRequest: async () => 'granted', openMicSettings: async () => true,
+  rewStatus: async () => ({ found: true, path: '/Applications/REW.app' }),
+  rewOpen: async () => { window.__calls.push('rewOpen'); return { ok: true }; },
+  rewChoose: async () => { window.__calls.push('rewChoose'); return { ok: true, path: '/x/REW.app' }; },
+  rewDownload: async () => { window.__calls.push('rewDownload'); return true; },
+};
+window.toast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };
+</script>
+<script src="../renderer/measure.js"></script>
+<script>
+const out = []; let fails = 0;
+const params = new URLSearchParams(location.search);
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FAIL  ') + name + (detail !== undefined ? '  ' + detail : '')); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(cond, ms){ const t0 = performance.now(); while(performance.now() - t0 < (ms || 20000)){ if(cond()) return true; await sleep(40); } return false; }
+const $ = (id) => document.getElementById(id);
+const st = () => Measure.debug().S;
+const seconds = () => (st().meter ? st().meter.total / st().fs : 0);
+const num = (id) => parseFloat($(id).textContent.replace(',', '.'));
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+(async () => {
+  try {
+    Measure.init($('measure'));
+    await Measure.show();
+    check('Seite aufgebaut: Eingang, Kanal, Start, Kalibrierung, REW vorhanden', !!($('m-device') && $('m-channel') && $('m-start') && $('m-cal') && $('m-rew-open')));
+    check('REW gefunden: Pfad wird angezeigt, "REW öffnen" sichtbar', /REW\.app/.test($('m-rew-info').textContent) && !$('m-rew-open').hidden && $('m-rew-dl').hidden, $('m-rew-info').textContent);
+    check('Gerätelisten: mindestens ein Eingang', $('m-device').options.length >= 1 && $('m-device').value !== '', Array.from($('m-device').options).map((o) => o.textContent).join(' | '));
+
+    // ---- Messung starten ----
+    await Measure.start();
+    check('Messung läuft, Aufnahme über AudioWorklet', st().running && st().cap && st().cap.mode === 'worklet', st().cap && st().cap.mode);
+    check('Start-Knopf zeigt "Messung stoppen"', /stoppen/.test($('m-start').textContent));
+    const gotAudio = await until(() => seconds() >= 3.5, 20000);
+    check('Audiodaten kommen an (mindestens 3,5 s in Echtzeit)', gotAudio, seconds().toFixed(2) + ' s, ' + st().fs + ' Hz');
+    check('Abtastrate plausibel', [44100, 48000, 88200, 96000].includes(st().fs), String(st().fs));
+    await sleep(300);
+    check('Anzeige unkalibriert: Einheit dBFS(A)', /dBFS\(A\)/.test($('m-unit').textContent), $('m-unit').textContent);
+    check('Kalibrier-Hinweis: "nicht kalibriert"', /nicht/.test($('m-cal-badge').textContent));
+    const v0 = num('m-value');
+    check('Pegel Kanal 1 = -23,0 dBFS (Testton -20 dBFS Spitze)', near(v0, -23.01, 0.6), 'angezeigt ' + v0);
+    check('Leq und Spitze werden angezeigt', near(num('m-leq'), -23.01, 0.6) && near(num('m-peak'), -20, 0.6), 'Leq ' + num('m-leq') + ', Spitze ' + num('m-peak'));
+    check('Leq 30 min zeigt Wert und Dauer', isFinite(num('m-leq30')) && /s|min/.test($('m-leq30-s').textContent), $('m-leq30').textContent + ' ' + $('m-leq30-s').textContent);
+    check('Balken folgt dem Pegel (nicht leer, nicht voll)', parseFloat($('m-bar-fill').style.left) > 30 && parseFloat($('m-bar-fill').style.left) < 100, $('m-bar-fill').style.left);
+    check('Kanäle: Auswahl passt zur Anzahl', $('m-channel').options.length >= 1, 'Kanäle ' + st().channels + ', Optionen ' + $('m-channel').options.length);
+
+    // ---- Spektrum ----
+    const gotRta = await until(() => !!st().levels, 8000);
+    check('Spektrum rechnet', gotRta);
+    if(gotRta){
+      const lv = st().levels, mx = Math.max(...lv), pk = lv.indexOf(mx);
+      check('stärkstes Terzband = 1 kHz mit -23 dBFS', pk === 17 && near(mx, -23.01, 0.8), 'Band ' + X32SPL.THIRD_OCTAVE_LABELS[pk] + ', ' + mx.toFixed(2));
+    }
+
+    // ---- Zweiter Kanal (6 dB leiser) ----
+    if(st().channels >= 2){
+      $('m-channel').value = '1'; $('m-channel').dispatchEvent(new Event('change', { bubbles: true }));
+      await until(() => seconds() >= 3, 12000); await sleep(200);
+      check('Kanal 2 = -29,0 dBFS (6 dB leiser)', near(num('m-value'), -29.03, 0.7), 'angezeigt ' + num('m-value'));
+      $('m-channel').value = '-1'; $('m-channel').dispatchEvent(new Event('change', { bubbles: true }));
+      await until(() => seconds() >= 3, 12000); await sleep(200);
+      check('Alle Kanäle gemittelt = -24,4 dBFS', near(num('m-value'), 10 * Math.log10(((0.1 + 0.05) / 2) ** 2 / 2), 0.8), 'angezeigt ' + num('m-value'));
+      $('m-channel').value = '0'; $('m-channel').dispatchEvent(new Event('change', { bubbles: true }));
+      await until(() => seconds() >= 3.5, 12000);
+    } else out.push('--    (Testgerät liefert nur 1 Kanal: Kanalwahl übersprungen)');
+
+    // ---- Bewertung und Zeitbewertung umschalten ----
+    const clickBtn = (grp, key, val) => { const b = $(grp).querySelector('[data-' + key + '="' + val + '"]'); b.click(); return b; };
+    clickBtn('m-weight', 'w', 'C'); await sleep(300);
+    check('Umschalten auf C: gleicher Pegel bei 1 kHz, Einheit dBFS(C)', near(num('m-value'), -23.01, 0.6) && /\(C\)/.test($('m-unit').textContent), $('m-value').textContent + ' ' + $('m-unit').textContent);
+    clickBtn('m-weight', 'w', 'Z'); clickBtn('m-tc', 't', 'slow'); await sleep(300);
+    check('Z + Slow: Pegel stimmt, Max-Beschriftung "Max Slow"', near(num('m-value'), -23.01, 0.6) && /Slow/.test($('m-max-k').textContent), $('m-value').textContent + ' ' + $('m-max-k').textContent);
+    clickBtn('m-weight', 'w', 'A'); clickBtn('m-tc', 't', 'fast'); await sleep(200);
+
+    // ---- Kalibrieren ----
+    $('m-ref').value = '94'; $('m-ref').dispatchEvent(new Event('change', { bubbles: true }));
+    $('m-cal').click();
+    check('Kalibrieren gestartet: Knopf gesperrt', $('m-cal').disabled);
+    const calDone = await until(() => !st().calibrating, 15000);
+    check('Kalibrierung fertig (3 s Messung)', calDone, $('m-cal').textContent);
+    await sleep(500);
+    const cals = JSON.parse(localStorage.getItem('x32.measure.cal') || '{}');
+    const off = Object.values(cals)[0];
+    check('Offset gespeichert: 94 - (-23,0) = +117,0 dB', typeof off === 'number' && near(off, 117.01, 0.6), JSON.stringify(cals));
+    check('nach Kalibrierung: Anzeige 94,0 dB(A), Badge "kalibriert"', near(num('m-value'), 94, 0.7) && /dB\(A\)/.test($('m-unit').textContent) && /^kalibriert/.test($('m-cal-badge').textContent), $('m-value').textContent + ' ' + $('m-unit').textContent + ' / ' + $('m-cal-badge').textContent);
+    check('Kalibrier-Meldung sichtbar', /Kalibriert: 94\.0/.test($('m-notice').textContent), $('m-notice').textContent);
+    check('Skala wechselt auf dB SPL (30 ... 130)', /^30/.test($('m-bar-scale').firstChild.textContent) && /130$/.test($('m-bar-scale').lastChild.textContent), $('m-bar-scale').textContent);
+    await until(() => seconds() > 0 && st().meter.snapshot().w.A.leq > -Infinity, 3000);
+
+    // ---- Grenzwert ----
+    $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true }));
+    $('m-limit-on').checked = true; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(300);
+    check('Grenzwert 90 dB(A) bei 94 dB: Pegel rot', $('m-value').classList.contains('over') && !$('m-bar-limit').hidden);
+    $('m-limit').value = '96'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
+    check('Grenzwert 96 dB(A) bei 94 dB (2 dB darunter): Pegel gelb', $('m-value').classList.contains('near'));
+    $('m-limit').value = '99'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
+    check('Grenzwert 99 dB(A): keine Warnung', !$('m-value').classList.contains('over') && !$('m-value').classList.contains('near'));
+    clickBtn('m-weight', 'w', 'C'); $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
+    check('Warnung nur bei A-Bewertung (bei C keine)', !$('m-value').classList.contains('over')); clickBtn('m-weight', 'w', 'A');
+    $('m-limit-on').checked = false; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
+
+    // ---- Zurücksetzen ----
+    $('m-reset').click(); await sleep(200);
+    check('Zurücksetzen: Leq beginnt neu (Wert nahe am aktuellen Pegel)', near(num('m-leq'), 94, 1.5), $('m-leq').textContent);
+
+    // ---- Falsche Werte bei Stille? Kalibrierung ohne Signal wird abgelehnt (Prüfung der Grenze) ----
+    // (wird in der Rechnungs-Prüfung abgedeckt; hier: Zurücksetzen der Kalibrierung)
+    $('m-cal-reset').click(); await sleep(200);
+    check('Kalibrierung zurücksetzen: wieder dBFS', /dBFS/.test($('m-unit').textContent) && /nicht/.test($('m-cal-badge').textContent));
+
+    // ---- REW-Knopf hält die Messung an ----
+    $('m-rew-open').click(); await sleep(300);
+    check('REW öffnen: Aufruf erfolgt, Messung angehalten', window.__calls.includes('rewOpen') && !st().running && /starten/.test($('m-start').textContent), JSON.stringify(window.__calls));
+    const tracksEnded = !st().cap;
+    check('Mikrofon nach dem Stoppen freigegeben', tracksEnded);
+    $('m-rew-choose').click(); $('m-rew-dl').hidden = false; $('m-rew-dl').click(); await sleep(100);
+    check('REW wählen / herunterladen rufen den Hauptprozess', window.__calls.includes('rewChoose') && window.__calls.includes('rewDownload'), JSON.stringify(window.__calls));
+
+    // ---- Ersatzweg ohne AudioWorklet ----
+    Measure.forceScriptProcessor = true;
+    await Measure.start();
+    const okSP = await until(() => seconds() >= 3, 15000);
+    await sleep(300);
+    check('Ersatzweg (ScriptProcessor): läuft und misst -23,0 dBFS', okSP && st().cap.mode === 'scriptprocessor' && near(num('m-value'), -23.01, 0.6), st().cap && st().cap.mode + ' ' + $('m-value').textContent);
+    Measure.forceScriptProcessor = false;
+    if(params.get('shot')){                                    // Bildschirmfoto: kalibriert, Grenzwert an, Messung läuft
+      $('m-limit').value = '99'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true }));
+      $('m-limit-on').checked = true; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
+      $('m-cal').click(); await until(() => !st().calibrating, 15000); await sleep(2500);
+    }
+    if(!params.get('shot')){
+      Measure.stop();
+      check('Stoppen: Aufnahme beendet', !st().running && !st().cap);
+    }
+    // ---- Verlassen der Seite stoppt die Messung ----
+    if(!params.get('shot')){
+      await Measure.start(); await until(() => seconds() > 0.5, 8000);
+      Measure.hide();
+      check('Seite verlassen (Reiter-Wechsel) stoppt die Messung', !st().running && !st().cap);
+    }
+  } catch (e) {
+    fails++; out.push('FAIL  Ausnahme: ' + (e && e.stack || e));
+  }
+  out.push(fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+  $('out').textContent = out.join('\n');
+  try { await fetch('http://127.0.0.1:8811/result', { method: 'POST', mode: 'no-cors', body: out.join('\n') }); } catch (e) {}
+})();
+</script>
+<script src="http://127.0.0.1:8811/wait"></script>
+</body></html>

@@ -271,9 +271,20 @@ function paintStrip(ui){
   ui.muteBtn.classList.toggle('active', muted);
 }
 
+// Ansicht: Pult (Ebenen) oder Messung (Pegel/RTA/REW, unabhängig vom Pult)
+let currentView = 'console';
+function showView(view){
+  currentView = view;
+  document.getElementById('console').hidden = view !== 'console';
+  document.getElementById('measure').hidden = view !== 'measure';
+  layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', view === 'measure' ? b.dataset.layer === 'measure' : b.dataset.layer === currentLayer));
+  if(view === 'measure'){ if(typeof closeDetail === 'function') closeDetail(); Measure.init(document.getElementById('measure')); Measure.show(); }
+  else Measure.hide();
+}
+
 function setLayer(id){
   currentLayer = id;
-  layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === id));
+  if(currentView === 'console') layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === id));
   unsubscribers.forEach((u) => u());
   unsubscribers = [];
   stripUI = {};
@@ -314,9 +325,12 @@ function buildDock(){
 function buildLayerTabs(){
   X32V.LAYERS.forEach((l) => {
     const b = el('<button class="layer-tab" data-layer="' + l.id + '">' + esc(l.label) + '</button>');
-    b.addEventListener('click', () => setLayer(l.id));
+    b.addEventListener('click', () => { setLayer(l.id); if(currentView !== 'console') showView('console'); });
     layerTabs.appendChild(b);
   });
+  const m = el('<button class="layer-tab measure-tab" data-layer="measure">Messung</button>');
+  m.addEventListener('click', () => showView('measure'));
+  layerTabs.appendChild(m);
 }
 
 // Pegel auf die sichtbaren Streifen verteilen

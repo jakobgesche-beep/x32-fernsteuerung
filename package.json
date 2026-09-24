@@ -1,6 +1,6 @@
 {
   "name": "x32-fernsteuerung",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "description": "Native Mac-App: Fernsteuerung für das Behringer X32 (Fader, EQ, Kompressor, Pegel)",
   "main": "main.js",
   "private": true,
@@ -29,7 +29,10 @@
         "zip"
       ],
       "artifactName": "X32-Fernsteuerung.${ext}",
-      "identity": null
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Für die Pegelmessung (dB-Meter) mit dem Messmikrofon am Audio-Interface."
+      }
     },
     "afterSign": "scripts/afterSignAdHoc.js",
     "publish": {

@@ -32,7 +32,7 @@ Bitfocus-Companion-Modul:
      nicht passt.
   2. **Nachfragen**: Mute alle 0,5 s, Fader alle 1 s (bei gesunden
      Schnappschüssen seltener, meldet das Pult nichts selbst, doppelt so oft).
-- **Eigene Änderungen**: sofort lokal und sofort zum Pult (danach höchstens ~60
+- **Eigene Änderungen**: sofort lokal und sofort zum Pult (danach höchstens ~100
   Pakete/s je Parameter, immer mit dem neuesten Wert). Während du ziehst, haben
   Hintergrundanfragen Pause, damit ein langsames Pult keinen Rückstau bekommt.
   Danach ein Kontroll-Lesen; stimmt der Wert am Pult nicht (Paket verloren),
@@ -131,6 +131,9 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/client-test.html` — Verbindungsschicht gegen das simulierte Pult
 - `test/e2e.html?test=1` — Oberfläche + Verbindungsschicht + simuliertes Pult
 - `test/latency-test.html` — Latenz-Messung unter fünf Netz-/Pult-Bedingungen
+- `test/spl-test.html` — Pegel-Rechnung (Bewertungskurven, Fast/Slow, Leq, Terzbänder) und REW-Suche mit erzeugten Signalen
+- `test/measure-test.html` — Messung Ende zu Ende mit simuliertem Mikrofon; braucht Echtzeit und einen kleinen Hilfsserver
+  (Chrome mit `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=ton.wav`, Ton: links 1 kHz mit -23 dBFS)
 
 ## Latenz-Messung (simuliert)
 
@@ -162,6 +165,27 @@ kurzer Abstand oder Kabel/USB-C-LAN-Adapter zum Router; AirDrop und Handoff am
 Mac ausschalten (stören das WLAN gelegentlich); der Router nur für die Anlage.
 Unter etwa 50 ms fühlt sich nichts mehr verzögert an – der Motor-Fader am Pult
 selbst braucht ohnehin länger.
+
+## Messung (dB-Meter, Spektrum, REW)
+
+Reiter **Messung** (rechts neben den Ebenen), unabhängig vom Pult:
+
+- **Eingang wählen** (z. B. das USB-Audio-Interface mit dem Behringer-Messmikrofon), Kanal 1/2/... oder alle gemittelt.
+  Aufnahme ohne Echo-Filter, Rauschunterdrückung und Auto-Gain (sonst wäre die Messung verfälscht); der Ton wird nie
+  ausgegeben. Das ECM8000 braucht 48 V Phantomspeisung am Interface.
+- **Pegel** mit A-/C-/Z-Bewertung und Fast (125 ms) / Slow (1 s) nach IEC 61672, dazu Leq (seit Start), gleitender
+  Leq über 30 min, Maximum und Spitze. Die Bewertungskurven weichen bis 8 kHz höchstens 0,4 dB von der Norm ab.
+- **Spektrum**: 31 Terzbänder (20 Hz - 20 kHz), Spitzenmarken.
+- **Kalibrierung**: Ohne Kalibrator sind die Werte nur relativ (dBFS). Kalibrator (94 dB bei 1 kHz) aufsetzen, Referenzpegel
+  eintragen, 3 s messen; der Offset wird je Gerät und Kanal gespeichert und gilt nur bei unveränderter Interface-Verstärkung.
+- **Grenzwert-Warnung** (optional, z. B. 99 dB(A)): färbt Pegel und Leq gelb/rot.
+- **REW**: Knopf startet die lokal installierte Messsoftware (sucht `REW.app` in /Applications und ~/Applications, sonst
+  von Hand wählbar). Beim Öffnen wird die Pegelmessung angehalten, damit das Interface frei ist.
+- macOS fragt beim ersten Start nach dem Mikrofon-Zugriff. Weil die App nur ad-hoc signiert ist, kann macOS nach einem
+  Update erneut fragen.
+
+Aufbau: `shared/spl.js` (Rechnung, ohne Web-Audio testbar), `shared/rew.js` (REW-Suche), `renderer/measure.js`
+(Aufnahme über AudioWorklet mit ScriptProcessor als Ersatz, Anzeige), Mikrofon-Freigabe und REW-Start in `main.js`.
 
 ## Ungetestet an echter Hardware
 

@@ -1,0 +1,191 @@
+<!DOCTYPE html><html><body><pre id="out"></pre>
+<script src="../shared/spl.js"></script>
+<script src="../shared/rew.js"></script>
+<script>
+// Prüft die Pegel-Rechnung mit erzeugten Signalen (bekannter Pegel rein -> gleicher Pegel raus).
+const out = []; let fails = 0;
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FAIL  ') + name + (detail !== undefined ? '  ' + detail : '')); }
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const { SplMeter, Spectrum, weightingDb, THIRD_OCTAVE_CENTERS } = X32SPL;
+
+function sine(fs, f, amp, seconds, phase){
+  const n = Math.round(fs * seconds), a = new Float32Array(n);
+  for(let i = 0; i < n; i++) a[i] = amp * Math.sin(2 * Math.PI * f * i / fs + (phase || 0));
+  return a;
+}
+function feed(m, sig, chunk){ chunk = chunk || 512; for(let i = 0; i < sig.length; i += chunk) m.push(sig.subarray(i, Math.min(sig.length, i + chunk))); }
+const dbfs = (amp) => 20 * Math.log10(amp / Math.SQRT2);   // Effektivpegel eines Sinus
+
+// Analytische A-/C-Bewertung (IEC 61672) zum Vergleich
+function analytic(type, f){
+  const f1 = 20.598997, f2 = 107.65265, f3 = 737.86223, f4 = 12194.217, f2s = f * f;
+  const ra = (12194.217 ** 2 * f2s ** 2) / ((f2s + f1 ** 2) * Math.sqrt((f2s + f2 ** 2) * (f2s + f3 ** 2)) * (f2s + f4 ** 2));
+  const rc = (f4 ** 2 * f2s) / ((f2s + f1 ** 2) * (f2s + f4 ** 2));
+  const r = type === 'A' ? ra : rc;
+  const at1k = (() => { const g = 1000 ** 2; return type === 'A'
+    ? (12194.217 ** 2 * g ** 2) / ((g + f1 ** 2) * Math.sqrt((g + f2 ** 2) * (g + f3 ** 2)) * (g + f4 ** 2))
+    : (f4 ** 2 * g) / ((g + f1 ** 2) * (g + f4 ** 2)); })();
+  return 20 * Math.log10(r / at1k);
+}
+
+// ---- Bewertungskurven gegen die Norm-Formel, bei 48 und 44,1 kHz ----
+for(const fs of [48000, 44100]){
+  let worstA = 0, worstC = 0, worstAh = 0;
+  const freqs = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000];
+  for(const f of freqs){
+    worstA = Math.max(worstA, Math.abs(weightingDb('A', f, fs) - analytic('A', f)));
+    worstC = Math.max(worstC, Math.abs(weightingDb('C', f, fs) - analytic('C', f)));
+  }
+  for(const f of [10000, 12500, 16000]) worstAh = Math.max(worstAh, Math.abs(weightingDb('A', f, fs) - analytic('A', f)));
+  check('A-Bewertung ' + fs + ' Hz: 20 Hz - 8 kHz weicht max. 0,4 dB von der Norm ab', worstA <= 0.4, 'max ' + worstA.toFixed(2) + ' dB');
+  check('C-Bewertung ' + fs + ' Hz: 20 Hz - 8 kHz weicht max. 0,4 dB ab', worstC <= 0.4, 'max ' + worstC.toFixed(2) + ' dB');
+  check('A-Bewertung ' + fs + ' Hz: 10 - 16 kHz weicht max. 7 dB ab (16 kHz ist der Ausreißer, Norm-Toleranz dort -17 dB)', worstAh <= 7, 'max ' + worstAh.toFixed(2) + ' dB');
+}
+check('A-Bewertung bei 1 kHz = 0 dB, 100 Hz = -19,1 dB, 10 kHz = -2,5 dB',
+  near(weightingDb('A', 1000, 48000), 0, 0.01) && near(weightingDb('A', 100, 48000), -19.1, 0.3) && near(weightingDb('A', 10000, 48000), -2.5, 0.5),
+  weightingDb('A', 100, 48000).toFixed(2) + ' / ' + weightingDb('A', 10000, 48000).toFixed(2));
+
+// ---- Pegel: bekannter Sinus rein -> gleicher Pegel raus ----
+{
+  const fs = 48000, amp = 0.1;                                    // -20 dBFS Spitze = -23,01 dBFS effektiv
+  const m = new SplMeter(fs);
+  feed(m, sine(fs, 1000, amp, 4));
+  const s = m.snapshot().w;
+  const ref = dbfs(amp);
+  check('1 kHz Sinus -20 dBFS: Fast/Slow/Leq (A) = -23,0 dBFS', near(s.A.fast, ref, 0.1) && near(s.A.slow, ref, 0.1) && near(s.A.leq, ref, 0.1), s.A.fast.toFixed(2) + ' / ' + s.A.slow.toFixed(2) + ' / ' + s.A.leq.toFixed(2));
+  check('1 kHz: A, C und Z zeigen dasselbe', near(s.A.leq, s.Z.leq, 0.05) && near(s.C.leq, s.Z.leq, 0.05), s.A.leq.toFixed(2) + ' ' + s.C.leq.toFixed(2) + ' ' + s.Z.leq.toFixed(2));
+  check('Spitzenwert = -20,0 dBFS', near(s.Z.peak, -20, 0.1), s.Z.peak.toFixed(2));
+  check('Maximum (Fast) nach Einschwingen = Pegel', near(s.A.maxFast, ref, 0.1), s.A.maxFast.toFixed(2));
+}
+{
+  const fs = 48000, amp = 0.1, m = new SplMeter(fs);
+  feed(m, sine(fs, 100, amp, 4));
+  const s = m.snapshot().w;
+  check('100 Hz: A-bewertet -19,1 dB, C-bewertet -0,3 dB gegenüber unbewertet', near(s.A.leq - s.Z.leq, -19.1, 0.3) && near(s.C.leq - s.Z.leq, -0.3, 0.3), (s.A.leq - s.Z.leq).toFixed(2) + ' / ' + (s.C.leq - s.Z.leq).toFixed(2));
+}
+{
+  const fs = 44100, m = new SplMeter(fs);
+  feed(m, sine(fs, 1000, 0.5, 3));
+  check('44,1 kHz: 1 kHz Sinus 0,5 -> ' + dbfs(0.5).toFixed(2) + ' dBFS', near(m.snapshot().w.A.leq, dbfs(0.5), 0.1), m.snapshot().w.A.leq.toFixed(2));
+}
+{
+  // Gleichspannung darf den Pegel nicht verfälschen
+  const fs = 48000, m = new SplMeter(fs), s0 = sine(fs, 1000, 0.1, 4);
+  for(let i = 0; i < s0.length; i++) s0[i] += 0.3;
+  feed(m, s0.subarray(0, fs)); m.resetHold();               // 1 s Einschwingen des Gleichspannungsfilters
+  feed(m, s0.subarray(fs));
+  check('Gleichspannungsanteil (0,3) wird ausgeblendet', near(m.snapshot().w.Z.leq, dbfs(0.1), 0.15), m.snapshot().w.Z.leq.toFixed(2));
+}
+
+// ---- Zeitbewertung ----
+{
+  const fs = 48000, amp = 0.1, m = new SplMeter(fs);
+  feed(m, new Float32Array(fs));                                   // 1 s Stille
+  feed(m, sine(fs, 1000, amp, 0.125));                             // dann Sprung: nach 125 ms = 63 % der Leistung
+  const s = m.snapshot().w;
+  const expectF = dbfs(amp) + 10 * Math.log10(1 - Math.exp(-1));
+  check('Fast: nach 125 ms Sprung 63 % der Leistung (-2,0 dB)', near(s.A.fast, expectF, 0.4), s.A.fast.toFixed(2) + ' erwartet ' + expectF.toFixed(2));
+  const m2 = new SplMeter(fs);
+  feed(m2, new Float32Array(fs));
+  feed(m2, sine(fs, 1000, amp, 1.0));
+  const s2 = m2.snapshot().w;
+  const expectS = dbfs(amp) + 10 * Math.log10(1 - Math.exp(-1));
+  check('Slow: nach 1 s Sprung 63 % der Leistung', near(s2.A.slow, expectS, 0.4), s2.A.slow.toFixed(2) + ' erwartet ' + expectS.toFixed(2));
+  check('Fast reagiert schneller als Slow', s2.A.fast > s2.A.slow + 1);
+}
+
+// ---- Leq und gleitender Leq ----
+{
+  const fs = 48000, amp = 0.1, m = new SplMeter(fs);
+  feed(m, sine(fs, 1000, amp, 3));
+  feed(m, new Float32Array(fs * 3));
+  check('Leq: 3 s Ton + 3 s Stille = 3 dB unter dem Ton', near(m.snapshot().w.A.leq, dbfs(amp) - 3.01, 0.1), m.snapshot().w.A.leq.toFixed(2));
+  const m2 = new SplMeter(fs, { leqWindowSec: 4 });
+  feed(m2, sine(fs, 1000, amp, 4));
+  const a = m2.snapshot().w.A.leq30;
+  feed(m2, new Float32Array(fs * 4));
+  const b = m2.snapshot().w.A.leq30;
+  check('gleitender Leq (4-s-Fenster): erst = Ton, dann nach 4 s Stille weit darunter', near(a, dbfs(amp), 0.2) && b < dbfs(amp) - 30, a.toFixed(2) + ' -> ' + b.toFixed(1));
+  const m3 = new SplMeter(fs, { leqWindowSec: 4 });
+  feed(m3, sine(fs, 1000, amp, 3)); feed(m3, new Float32Array(fs * 2));
+  const c = m3.snapshot().w.A.leq30;
+  check('gleitender Leq: Fenster 4 s mit 2 s Ton + 2 s Stille = -3 dB', near(c, dbfs(amp) - 3.01, 0.3), c.toFixed(2));
+  m.resetHold();
+  const r = m.snapshot().w.A;
+  check('Reset: Leq, Maximum und Spitze neu, gleitender Leq bleibt', r.leq === -Infinity && r.maxFast === -Infinity && r.peak === -Infinity && r.leq30 > -Infinity);
+}
+{
+  const fs = 48000, m = new SplMeter(fs);
+  const s = m.snapshot().w.A;
+  check('Stille: keine Werte statt Fehler', s.leq === -Infinity && s.fast === -Infinity && s.peak === -Infinity);
+}
+
+// ---- Kalibrier-Messfenster ----
+{
+  const fs = 48000, amp = 0.05, m = new SplMeter(fs);
+  feed(m, sine(fs, 1000, 0.3, 1));                                 // Vorlauf, soll nicht zählen
+  m.beginCapture();
+  feed(m, sine(fs, 1000, amp, 3));
+  const cap = m.capture('A');
+  m.endCapture();
+  const offset = 94 - cap.level;
+  check('Kalibrierfenster: 3 s Kalibrator-Ton, Offset = 94 - Messwert', near(cap.seconds, 3, 0.01) && near(cap.level, dbfs(amp), 0.1), cap.level.toFixed(2) + ' dBFS, Offset ' + offset.toFixed(2));
+  feed(m, sine(fs, 1000, amp, 2));
+  const after = m.snapshot().w.A.fast + offset;
+  check('nach dem Kalibrieren zeigt derselbe Ton 94,0 dB', near(after, 94, 0.15), after.toFixed(2));
+  feed(m, sine(fs, 1000, amp * 2, 3));
+  const doubled = m.snapshot().w.A.fast + offset;
+  check('doppelte Amplitude = +6,0 dB (100,0 dB)', near(doubled, 100.02, 0.2), doubled.toFixed(2));
+}
+
+// ---- Terzband-Analyse ----
+{
+  const fs = 48000, amp = 0.1, sp = new Spectrum(fs);
+  check('Terzbänder: 31 Bänder von 20 Hz bis 20 kHz, 1 kHz an Position 17', THIRD_OCTAVE_CENTERS.length === 31 && near(THIRD_OCTAVE_CENTERS[17], 1000, 1e-6) && near(THIRD_OCTAVE_CENTERS[0], 19.95, 0.01) && near(THIRD_OCTAVE_CENTERS[30], 19953, 1));
+  const sig = sine(fs, 1000, amp, 1);
+  for(let i = 0; i < sig.length; i += 512) sp.push(sig.subarray(i, i + 512));
+  const p = sp.bandPowers();
+  const lvl = Array.from(p).map((v) => 10 * Math.log10(Math.max(v, 1e-20)));
+  const peakBand = lvl.indexOf(Math.max(...lvl));
+  check('1 kHz Sinus: stärkstes Band ist 1 kHz mit -23,0 dBFS', peakBand === 17 && near(lvl[17], dbfs(amp), 0.3), 'Band ' + THIRD_OCTAVE_CENTERS[peakBand].toFixed(0) + ' Hz, ' + lvl[17].toFixed(2));
+  const sum = 10 * Math.log10(Array.from(p).reduce((a, b) => a + b, 0));
+  check('Summe aller Bänder = Gesamtpegel', near(sum, dbfs(amp), 0.3), sum.toFixed(2));
+  check('Nachbarbänder (800 Hz, 1,25 kHz) mind. 35 dB tiefer', lvl[16] < lvl[17] - 35 && lvl[18] < lvl[17] - 35, lvl[16].toFixed(1) + ' / ' + lvl[18].toFixed(1));
+  const p2 = new Spectrum(fs);
+  const s63 = sine(fs, 63, amp, 1);
+  for(let i = 0; i < s63.length; i += 512) p2.push(s63.subarray(i, i + 512));
+  const l2 = Array.from(p2.bandPowers()).map((v) => 10 * Math.log10(Math.max(v, 1e-20)));
+  const pb2 = l2.indexOf(Math.max(...l2));
+  check('63 Hz Sinus: Band 63 Hz mit -23,0 dBFS', pb2 === 5 && near(l2[5], dbfs(amp), 0.6), THIRD_OCTAVE_CENTERS[pb2].toFixed(1) + ' Hz, ' + l2[5].toFixed(2));
+  const p3 = new Spectrum(fs);
+  const s16 = sine(fs, 16000, amp, 1);
+  for(let i = 0; i < s16.length; i += 512) p3.push(s16.subarray(i, i + 512));
+  const l3 = Array.from(p3.bandPowers()).map((v) => 10 * Math.log10(Math.max(v, 1e-20)));
+  check('16 kHz Sinus: Band 16 kHz', l3.indexOf(Math.max(...l3)) === 29 && near(l3[29], dbfs(amp), 0.4), l3[29].toFixed(2));
+  const early = new Spectrum(fs); early.push(new Float32Array(1000));
+  check('vor dem ersten vollen Fenster: keine Werte', early.bandPowers() === null);
+  const t0 = performance.now(); for(let i = 0; i < 20; i++) sp.bandPowers(); const per = (performance.now() - t0) / 20;
+  check('eine Terzband-Berechnung (16384-FFT) unter 10 ms', per < 10, per.toFixed(2) + ' ms');
+  const t1 = performance.now(); const mm = new SplMeter(fs); const big = sine(fs, 1000, 0.1, 5); feed(mm, big); const dt = performance.now() - t1;
+  check('5 s Audio durch alle drei Bewertungen in unter 500 ms (Echtzeit-Reserve)', dt < 500, dt.toFixed(0) + ' ms für 5 s');
+}
+
+// ---- REW-Suche ----
+{
+  const mk = (files) => ({ home: '/Users/x', exists: (p) => files.has(p), list: (d) => Array.from(files.keys ? files.keys() : []).filter((p) => p.startsWith(d + '/') && !p.slice(d.length + 1).includes('/')).map((p) => p.slice(d.length + 1)) });
+  const set = (...p) => { const s = new Set(p); return s; };
+  const env = (paths, saved) => { const s = set(...paths); return { saved, home: '/Users/x', exists: (p) => s.has(p), list: (d) => { const seen = new Set(); paths.forEach((p) => { if(p.startsWith(d + '/')) seen.add(p.slice(d.length + 1).split('/')[0]); }); return Array.from(seen); } }; };
+  check('REW: /Applications/REW.app wird gefunden', X32REW.findRew(env(['/Applications/REW.app'])).path === '/Applications/REW.app');
+  check('REW: Nicht installiert = null', X32REW.findRew(env(['/Applications/Safari.app', '/Applications/Rewind.app'])) === null);
+  check('REW: Ordner /Applications/REW/REW.app', X32REW.findRew(env(['/Applications/REW/REW.app'])).path === '/Applications/REW/REW.app');
+  const scan = X32REW.findRew(env(['/Applications/REW 5.31.app', '/Applications/Safari.app']));
+  check('REW: Versionsname wird per Suche gefunden', scan && scan.path === '/Applications/REW 5.31.app' && scan.source === 'scan', scan && scan.path);
+  check('REW: Programme-Ordner im Benutzerverzeichnis', X32REW.findRew(env(['/Users/x/Applications/REW.app'])).path === '/Users/x/Applications/REW.app');
+  check('REW: gespeicherter Pfad hat Vorrang', X32REW.findRew(env(['/Applications/REW.app', '/Volumes/Tools/REW.app'], '/Volumes/Tools/REW.app')).path === '/Volumes/Tools/REW.app');
+  check('REW: gespeicherter Pfad, der nicht mehr existiert, wird ignoriert', X32REW.findRew(env(['/Applications/REW.app'], '/Volumes/weg/REW.app')).path === '/Applications/REW.app');
+  check('REW: "Room EQ Wizard.app" wird erkannt', X32REW.findRew(env(['/Applications/Room EQ Wizard.app'])).path === '/Applications/Room EQ Wizard.app');
+}
+
+out.push(fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+document.getElementById('out').textContent = out.join('\n');
+</script></body></html>

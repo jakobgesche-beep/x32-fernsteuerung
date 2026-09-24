@@ -21,6 +21,14 @@ contextBridge.exposeInMainWorld("x32API", {
   onMeter: (cb) => on("x32-meter", cb),
   onStatus: (cb) => on("x32-status", cb),
   onLog: (cb) => on("x32-log", cb),
+  // Messung: Mikrofon-Freigabe und REW
+  micStatus: () => ipcRenderer.invoke("mic-status"),
+  micRequest: () => ipcRenderer.invoke("mic-request"),
+  openMicSettings: () => ipcRenderer.invoke("mic-open-settings"),
+  rewStatus: () => ipcRenderer.invoke("rew-status"),
+  rewOpen: () => ipcRenderer.invoke("rew-open"),
+  rewChoose: () => ipcRenderer.invoke("rew-choose"),
+  rewDownload: () => ipcRenderer.invoke("rew-download"),
   // Updates
   getVersion: () => ipcRenderer.invoke("get-version"),
   installUpdate: () => ipcRenderer.invoke("install-update"),

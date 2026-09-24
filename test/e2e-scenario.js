@@ -254,6 +254,15 @@ window.__mockInit = (mock) => {
     openDetail(STRIP_BY_ID['aux1']); await sleep(200);
     check('Aux 1: nur EQ-Tab (kein Kompressor)', proc.els.tabDyn.parentElement === null);
     closeDetail();
+    // Messung: eigener Reiter neben den Ebenen, funktioniert ohne Pult-Bedienung
+    const mTab = document.querySelector('.layer-tab.measure-tab');
+    check('Reiter "Messung" neben den Pult-Ebenen', !!mTab && mTab.textContent === 'Messung');
+    mTab.click(); await sleep(300);
+    check('Messung: Pult-Fläche ausgeblendet, Messung sichtbar, Reiter markiert', document.getElementById('console').hidden && !document.getElementById('measure').hidden && mTab.classList.contains('on') && !document.querySelector('.layer-tab[data-layer="ch"]').classList.contains('on'));
+    check('Messung: Zugriff verweigert -> Hinweis mit Systemeinstellungen-Knopf', /ausgeschaltet/.test(document.getElementById('m-notice').textContent) && /Systemeinstellungen/.test(document.getElementById('m-notice').textContent), document.getElementById('m-notice').textContent.slice(0, 60));
+    check('Messung: REW nicht gefunden -> Hinweis und Download-Knopf', /nicht gefunden/.test(document.getElementById('m-rew-info').textContent) && document.getElementById('m-rew-open').hidden && !document.getElementById('m-rew-dl').hidden, document.getElementById('m-rew-info').textContent.slice(0, 50));
+    document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(300);
+    check('zurück zum Pult: Messung ausgeblendet, Ebene "Bus" aktiv, Fader sichtbar', !document.getElementById('console').hidden && document.getElementById('measure').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
     out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');
     const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n');
     return;
