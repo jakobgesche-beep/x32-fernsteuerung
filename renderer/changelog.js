@@ -1,5 +1,15 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.6.0': {
+    title: 'Neu in Version 2.6.0',
+    items: [
+      ['Neues Design „Studio"', 'Warmes Graphit mit Bernstein, LED-Meter, farbige Kanalköpfe. Oben links lässt sich jederzeit auf „Klassisch" zurückschalten.'],
+      ['Übersicht über den Fadern', 'Live-Pegel vom Messmikrofon mit Verlauf und Spektrum, Main-Pegel groß, und „Auf einen Blick": Kanäle mit Signal, stumme und übersteuerte Kanäle. Mit dem Pfeil oben einklappbar.'],
+      ['Offline-Modus', 'Ohne Pult alle Regler ausprobieren und vorbereiten (Knopf „Offline-Modus"). Beim Verbinden lässt sich der Stand aufs Pult übertragen.'],
+      ['REW-Knopf oben', 'Der Reiter „Messung" ist weg: Die Feinmessung macht REW, „REW öffnen" steht immer oben in der Kopfzeile. Die Grenzwert-Warnung bleibt.'],
+      ['Weniger Rechner', 'Der dB-Umrechner ist entfernt.'],
+    ],
+  },
   '2.5.0': {
     title: 'Neu in Version 2.5.0',
     items: [

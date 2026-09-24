@@ -406,6 +406,12 @@ registerProcessor('x32-tap', X32Tap);`;
     if (force || cnt !== histCount) { histCount = cnt; drawHist(); }
   }
 
+  // Diagrammfarben folgen dem Design (Variablen --chart, --chart-hi, --chart-lo)
+  function chartColors() {
+    const cs = getComputedStyle(document.body), v = (n, d) => cs.getPropertyValue(n).trim() || d;
+    return { main: v('--chart', '#3DC7E8'), hi: v('--chart-hi', '#8EEBFA'), lo: v('--chart-lo', '#1E93B0') };
+  }
+
   // Spektrum
   const RTA = { left: 34, right: 8, top: 10, bottom: 22 };
   function updateSpectrum() {
@@ -438,13 +444,14 @@ registerProcessor('x32-tap', X32Tap);`;
     const bw = (x1 - x0) / n;
     g.textAlign = 'center'; g.textBaseline = 'top'; g.fillStyle = '#7C8698';
     SPL.THIRD_OCTAVE_LABELS.forEach((l, i) => { if ([2, 5, 8, 11, 14, 17, 20, 23, 26, 29].includes(i)) g.fillText(l, x0 + (i + 0.5) * bw, y1 + 5); });
+    const col = chartColors();
     if (S.levels) {
       S.levels.forEach((v, i) => {
         const lv = v + (offset() || 0);
         if (isFinite(lv) && lv > lo) {
           const top = yOf(lv);
-          const grad = g.createLinearGradient(0, y1, 0, y0); grad.addColorStop(0, '#1E93B0'); grad.addColorStop(0.7, '#3DC7E8'); grad.addColorStop(1, '#8EEBFA');
-          g.fillStyle = i === S.hover ? '#8EEBFA' : grad; g.fillRect(x0 + i * bw + 1, top, Math.max(1, bw - 2), y1 - top);
+          const grad = g.createLinearGradient(0, y1, 0, y0); grad.addColorStop(0, col.lo); grad.addColorStop(0.7, col.main); grad.addColorStop(1, col.hi);
+          g.fillStyle = i === S.hover ? col.hi : grad; g.fillRect(x0 + i * bw + 1, top, Math.max(1, bw - 2), y1 - top);
         }
         const hv = S.hold[i] + (offset() || 0);
         if (isFinite(hv) && hv > lo) { g.fillStyle = 'rgba(231,235,240,0.75)'; g.fillRect(x0 + i * bw + 1, yOf(hv) - 1, Math.max(1, bw - 2), 2); }
@@ -487,8 +494,7 @@ registerProcessor('x32-tap', X32Tap);`;
       g.strokeStyle = 'rgba(225,96,76,0.9)'; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(x0, yOf(cfg.limit)); g.lineTo(x1, yOf(cfg.limit)); g.stroke(); g.setLineDash([]);
     }
     if (n) {
-      const grad = g.createLinearGradient(0, y1, 0, y0); grad.addColorStop(0, '#1E93B0'); grad.addColorStop(1, '#8EEBFA');
-      g.strokeStyle = '#3DC7E8'; g.lineWidth = 1.6; g.lineJoin = 'round'; g.beginPath();
+      g.strokeStyle = chartColors().main; g.lineWidth = 1.8; g.lineJoin = 'round'; g.beginPath();
       let pen = false;
       h.values.forEach((v, k) => {
         const l = level(v);

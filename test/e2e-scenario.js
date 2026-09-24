@@ -68,7 +68,7 @@ window.__mockInit = (mock) => {
     check('Statusanzeige', /Verbunden · X32C/.test(document.getElementById('status-text').textContent), document.getElementById('status-text').textContent);
     // Kanal-Ebene
     const u2 = stripUI['ch02'];
-    check('Kanal 2: Name, Icon, Farbe aus dem Pult', u2 && u2.name.textContent === 'Kick Out' && u2.icon.innerHTML.includes('<svg') && u2.strip && getComputedStyle(u2.icon.parentElement).backgroundColor !== 'rgba(0, 0, 0, 0)', u2 && u2.name.textContent);
+    check('Kanal 2: Name, Icon, Farbe aus dem Pult', u2 && u2.name.textContent === 'Kick Out' && u2.icon.innerHTML.includes('<svg') && u2.strip && u2.wrap.style.getPropertyValue('--cap-line') !== '', u2 && u2.name.textContent);
     check('Kanal 7 stummgeschaltet dargestellt', stripUI['ch07'].wrap.classList.contains('muted'));
     check('32 Kanalzüge in der Ebene', Object.keys(stripUI).length === 32);
 
@@ -242,7 +242,7 @@ window.__mockInit = (mock) => {
     check('Streifen im Hintergrund zeigt den neuen Namen sofort', stripUI['ch01'].name.textContent === 'Buehne 1 Lea');
     check('Namensschild in der Ansicht aktualisiert sich', proc.els.chip.textContent.includes('Buehne 1 Lea'));
     cf.colorBtns[4].click(); await sleep(80);
-    check('Farbe Blau (4) am Pult gesetzt und im Streifen sichtbar', __ctl.mock.store.get('/ch/01/config/color') === 4 && getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor === 'rgb(76, 124, 224)', getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor);
+    check('Farbe Blau (4) am Pult gesetzt und im Streifen sichtbar', __ctl.mock.store.get('/ch/01/config/color') === 4 && stripUI['ch01'].wrap.style.getPropertyValue('--cap-line').toUpperCase() === '#4C7CE0', stripUI['ch01'].wrap.style.getPropertyValue('--cap-line'));
     cf.colorBtns[9].click(); await sleep(80);
     check('Farbe "invers" (9) wird als Umrandung dargestellt', __ctl.mock.store.get('/ch/01/config/color') === 9 && getComputedStyle(stripUI['ch01'].icon.parentElement).backgroundColor === 'rgba(0, 0, 0, 0)');
     cf.iconBtns[8].click(); await sleep(80);
@@ -317,10 +317,10 @@ window.__mockInit = (mock) => {
 
     // "Neu in dieser Version"
     try { localStorage.removeItem('x32.seenVersion'); } catch(e){}
-    maybeShowChangelog('2.5.0');
+    maybeShowChangelog('2.6.0');
     const shown = !!document.getElementById('changelog-overlay') && document.querySelectorAll('.changelog-item').length >= 4;
     document.getElementById('changelog-overlay').querySelector('button').click();
-    maybeShowChangelog('2.5.0');
+    maybeShowChangelog('2.6.0');
     check('Neu-in-Version: erscheint einmal mit Liste, nach "Verstanden" nicht wieder', shown && !document.getElementById('changelog-overlay'));
     maybeShowChangelog('9.9.9');
     check('Neu-in-Version: unbekannte Version zeigt nichts', !document.getElementById('changelog-overlay'));
@@ -379,6 +379,14 @@ window.__mockInit = (mock) => {
     check('Werkzeuge: Übersicht ausgeblendet', ovEl.hidden);
     document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
     check('zurück zum Pult: Übersicht und Fader wieder da', !ovEl.hidden && !document.getElementById('console').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
+    // Design: Studio (neu) und Klassisch umschaltbar, Wahl wird gemerkt
+    const acc = () => getComputedStyle(document.body).getPropertyValue('--accent').trim().toUpperCase();
+    check('Design: Standard ist "Studio" (Bernstein), Knopf zeigt es an', document.body.classList.contains('studio') && acc() === '#FFB13B' && /Studio/.test(document.getElementById('design-btn').textContent), acc());
+    document.getElementById('design-btn').click(); await sleep(100);
+    check('Design: Klick wechselt zu "Klassisch" (Türkis), gemerkt', !document.body.classList.contains('studio') && acc() === '#3DC7E8' && /Klassisch/.test(document.getElementById('design-btn').textContent) && localStorage.getItem('x32-design') === 'classic', acc());
+    document.getElementById('design-btn').click(); await sleep(100);
+    check('Design: zurück zu "Studio"', document.body.classList.contains('studio') && acc() === '#FFB13B' && localStorage.getItem('x32-design') === 'studio');
+
     // Offline-Modus (ohne Pult arbeiten, später übertragen)
     try { localStorage.removeItem('x32.offline'); } catch(e){}
     X.clearOffline();

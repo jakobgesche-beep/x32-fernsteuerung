@@ -328,7 +328,8 @@ function paintStrip(ui){
   }
   const on = X.get(ui.onPath);
   const muted = on === 0;
-  ui.wrap.style.setProperty('--cap-line', CH_HUES[(color || 0) % 8] || '#3DC7E8');
+  const hue = CH_HUES[(color || 0) % 8];
+  if(hue) ui.wrap.style.setProperty('--cap-line', hue); else ui.wrap.style.removeProperty('--cap-line');     // ohne Farbe: Standardfarbe des Designs
   ui.wrap.classList.toggle('muted', muted);
   ui.muteBtn.classList.toggle('active', muted);
 }
@@ -463,6 +464,17 @@ window.x32API.onUpdateError((msg) => {
   toast('Update fehlgeschlagen: ' + msg, true);
 });
 window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; if(!window.__noAutoConnect) maybeShowChangelog(v); });
+
+// ---------- Design: Studio (neu) oder Klassisch ----------
+const designBtn = document.getElementById('design-btn');
+function applyDesign(d){
+  document.body.classList.toggle('studio', d === 'studio');
+  designBtn.textContent = d === 'studio' ? 'Design: Studio' : 'Design: Klassisch';
+  try { localStorage.setItem('x32-design', d); } catch(e){}
+  if(typeof Measure !== 'undefined') Measure.redraw();
+}
+designBtn.addEventListener('click', () => applyDesign(document.body.classList.contains('studio') ? 'classic' : 'studio'));
+try { applyDesign(localStorage.getItem('x32-design') === 'classic' ? 'classic' : 'studio'); } catch(e){}
 
 // ================= Start =================
 const rewBtn = document.getElementById('rew-btn');

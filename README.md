@@ -132,6 +132,7 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/e2e.html?test=1` — Oberfläche + Verbindungsschicht + simuliertes Pult
 - `test/latency-test.html` — Latenz-Messung unter fünf Netz-/Pult-Bedingungen
 - `test/calc-test.html` — Rechner (Delay, Tempo, Pegel, Ton)
+- `test/offline-test.html` — Startwerte für alle Parameter und der Offline-Speicher
 - `test/spl-test.html` — Pegel-Rechnung (Bewertungskurven, Fast/Slow, Leq, Terzbänder) und REW-Suche mit erzeugten Signalen
 - `test/measure-test.html` — Messung Ende zu Ende mit simuliertem Mikrofon; braucht Echtzeit und einen kleinen Hilfsserver
   (Chrome mit `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=ton.wav`, Ton: links 1 kHz mit -23 dBFS)
@@ -177,33 +178,43 @@ selbst braucht ohnehin länger.
   Laden fragt nach (nennt die Zahl der Änderungen), schickt nur echte Unterschiede (~240 Werte/s) und sichert den alten
   Stand für "Rückgängig". Die Szenen liegen nur in der App, nicht im Pult.
 - **Werkzeuge** (`renderer/tools.js`, `shared/calc.js`): Laufzeit/Delay aus Entfernung und Temperatur, Echo-Zeiten nach Tempo
-  (mit Tippen), Pegel über Entfernung und Addition mehrerer Quellen, Frequenz -> Wellenlänge/Ton, dB-Umrechnung.
-- **Pegelverlauf und Protokoll** in der Messung: Leq je Sekunde bis 30 Minuten, "Protokoll speichern" schreibt eine CSV
-  (Semikolon, Dezimalkomma) über den Speichern-Dialog.
+  (mit Tippen), Pegel über Entfernung und Addition mehrerer Quellen, Frequenz -> Wellenlänge/Ton.
+- **Pegelverlauf und Protokoll** im Live-Pegel: Leq je Sekunde bis 30 Minuten, "CSV" schreibt eine Datei (Semikolon,
+  Dezimalkomma) über den Speichern-Dialog.
 - **Neu in dieser Version**: Fenster einmal nach einem Update (`renderer/changelog.js`).
 
 Jede Funktion steckt in einer eigenen Datei bzw. einem eigenen Commit und lässt sich einzeln wieder entfernen.
 
-## Messung (dB-Meter, Spektrum, REW)
+## Live-Pegel, Übersicht und REW (Version 2.6)
 
-Reiter **Messung** (rechts neben den Ebenen), unabhängig vom Pult:
+Über den Fadern liegt eine **Übersicht** (mit dem Pfeil oben einklappbar):
 
-- **Eingang wählen** (z. B. das USB-Audio-Interface mit dem Behringer-Messmikrofon), Kanal 1/2/... oder alle gemittelt.
-  Aufnahme ohne Echo-Filter, Rauschunterdrückung und Auto-Gain (sonst wäre die Messung verfälscht); der Ton wird nie
-  ausgegeben. Das ECM8000 braucht 48 V Phantomspeisung am Interface.
-- **Pegel** mit A-/C-/Z-Bewertung und Fast (125 ms) / Slow (1 s) nach IEC 61672, dazu Leq (seit Start), gleitender
-  Leq über 30 min, Maximum und Spitze. Die Bewertungskurven weichen bis 8 kHz höchstens 0,4 dB von der Norm ab.
-- **Spektrum**: 31 Terzbänder (20 Hz - 20 kHz), Spitzenmarken.
-- **Kalibrierung**: Ohne Kalibrator sind die Werte nur relativ (dBFS). Kalibrator (94 dB bei 1 kHz) aufsetzen, Referenzpegel
-  eintragen, 3 s messen; der Offset wird je Gerät und Kanal gespeichert und gilt nur bei unveränderter Interface-Verstärkung.
-- **Grenzwert-Warnung** (optional, z. B. 99 dB(A)): färbt Pegel und Leq gelb/rot.
-- **REW**: Knopf startet die lokal installierte Messsoftware (sucht `REW.app` in /Applications und ~/Applications, sonst
-  von Hand wählbar). Beim Öffnen wird die Pegelmessung angehalten, damit das Interface frei ist.
-- macOS fragt beim ersten Start nach dem Mikrofon-Zugriff. Weil die App nur ad-hoc signiert ist, kann macOS nach einem
-  Update erneut fragen.
+- **Live-Pegel** (`renderer/measure.js`): dB(A) (Fast) vom Messmikrofon am USB-Audio-Interface, Balken, Leq 30 min, Maximum,
+  Pegelverlauf (Leq je Sekunde, bis 30 min, CSV-Export) und Terzband-Spektrum. Aufnahme ohne Echo-Filter, Rauschunterdrückung
+  und Auto-Gain; der Ton wird nie ausgegeben. Das ECM8000 braucht 48 V Phantomspeisung am Interface. Zahnrad: Kalibrierung
+  (Kalibrator, z. B. 94 dB bei 1 kHz, oder Referenzgerät; Offset je Gerät und Kanal), Grenzwert-Warnung (z. B. 99 dB(A)) und
+  REW-Programm. Ohne Kalibrierung sind die Werte relativ (dBFS). Die Feinmessung (Frequenzgang, Nachhall usw.) macht REW.
+- **Main LR** groß mit Spitzenwert und Übersteuerungs-Lampe, **Auf einen Blick**: Kanäle mit Signal, stumme und übersteuerte Kanäle.
+- **REW öffnen** (Kopfzeile): startet die lokal installierte Software (sucht `REW.app` in /Applications und ~/Applications,
+  sonst von Hand wählbar) und hält dafür die Live-Anzeige an, damit das Interface frei ist.
+- macOS fragt beim ersten Start des Live-Pegels nach dem Mikrofon-Zugriff (nicht schon beim Programmstart). Weil die App nur
+  ad-hoc signiert ist, kann macOS nach einem Update erneut fragen.
 
-Aufbau: `shared/spl.js` (Rechnung, ohne Web-Audio testbar), `shared/rew.js` (REW-Suche), `renderer/measure.js`
-(Aufnahme über AudioWorklet mit ScriptProcessor als Ersatz, Anzeige), Mikrofon-Freigabe und REW-Start in `main.js`.
+Rechnung in `shared/spl.js` (Bewertungsfilter A/C/Z nach IEC 61672, Fast/Slow, Leq, Spitze, Terzbänder), REW-Suche in `shared/rew.js`,
+Aufnahme über AudioWorklet mit ScriptProcessor als Ersatz, Mikrofon-Freigabe und REW-Start in `main.js`.
+
+## Offline-Modus (Version 2.6)
+
+Knopf **Offline-Modus** (Kopfzeile oder Startbildschirm): die ganze Oberfläche läuft ohne Pult mit Startwerten
+(`X32V.defaultWire`: Fader 0 dB, EQ glatt, Kompressor/Gate aus). Änderungen wirken nur in der App, bleiben im lokalen Speicher
+(überleben den Neustart) und lassen sich mit den Szenen kombinieren. Nach dem Verbinden erscheint "Offline vorbereitet: N
+Einstellungen" mit **Aufs Pult übertragen** (nach Rückfrage, gebremst mit ~240 Werten/s; es werden nur Werte geschrieben, die vom
+Startwert abweichen) oder Verwerfen.
+
+## Design (Version 2.6)
+
+Standard ist **Studio** (`renderer/design-studio.css`, Klasse `studio` am `<body>`): Graphit, Bernstein, LED-Meter, farbige
+Kanalköpfe. Oben links schaltet "Design" auf **Klassisch** (das bisherige Türkis-Design) um; die Wahl wird gemerkt.
 
 ## Ungetestet an echter Hardware
 

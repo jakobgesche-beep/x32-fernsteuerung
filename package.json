@@ -1,6 +1,6 @@
 {
   "name": "x32-fernsteuerung",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Native Mac-App: Fernsteuerung für das Behringer X32 (Fader, EQ, Kompressor, Pegel)",
   "main": "main.js",
   "private": true,
