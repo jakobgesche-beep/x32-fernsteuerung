@@ -13,7 +13,9 @@ contextBridge.exposeInMainWorld("x32API", {
   onChannelDetail: (cb) => ipcRenderer.on("x32-channel-detail", (event, data) => cb(data)),
   onMeters: (cb) => ipcRenderer.on("x32-meters", (event, levels) => cb(levels)),
   onLog: (cb) => ipcRenderer.on("x32-log", (event, msg) => cb(msg)),
-  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
-  installUpdateNow: () => ipcRenderer.invoke("install-update-now"),
-  onUpdateReady: (cb) => ipcRenderer.on("update-ready", (event, version) => cb(version)),
+  getVersion: () => ipcRenderer.invoke("get-version"),
+  installUpdate: () => ipcRenderer.invoke("install-update"),
+  onUpdateAvailable: (cb) => ipcRenderer.on("update-available", (event, version) => cb(version)),
+  onUpdateProgress: (cb) => ipcRenderer.on("update-progress", (event, text) => cb(text)),
+  onUpdateError: (cb) => ipcRenderer.on("update-error", (event, msg) => cb(msg)),
 });

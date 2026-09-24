@@ -1,8 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const os = require("os");
+const fs = require("fs");
 const dgram = require("dgram");
-const { autoUpdater } = require("electron-updater");
+const { execFile, spawn } = require("child_process");
+const { Readable } = require("stream");
+const { pipeline } = require("stream/promises");
 const proto = require("./x32-protocol");
 
 const X32_PORT = 10023;
@@ -229,26 +232,141 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 
-autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.on("checking-for-update", () => log("Suche nach Updates..."));
-autoUpdater.on("update-available", (info) => log("Update gefunden: Version " + info.version + " wird heruntergeladen..."));
-autoUpdater.on("update-not-available", () => log("Kein Update verfügbar."));
-autoUpdater.on("error", (err) => log("Update-Fehler: " + err.message));
-autoUpdater.on("update-downloaded", (info) => {
-  log("Update " + info.version + " heruntergeladen — wird beim nächsten Beenden installiert.");
-  if (mainWindow) mainWindow.webContents.send("update-ready", info.version);
+// ---------- Eigener Updater ----------
+// electron-updater/Squirrel.Mac verlangt eine echte Apple-Signatur und bricht bei
+// ad-hoc-signierten Apps stillschweigend ab. Deshalb: neue .zip von GitHub laden,
+// entpacken, die App-Datei nach dem Beenden austauschen und neu starten.
+const UPDATE_REPO = "jakobgesche-beep/x32-fernsteuerung";
+const UPDATE_ASSET = "X32-Fernsteuerung.zip";
+let pendingUpdate = null;
+
+function versionParts(v) { return String(v).replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0); }
+function isNewer(latest, current) {
+  const a = versionParts(latest), b = versionParts(current);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] || 0) > (b[i] || 0)) return true;
+    if ((a[i] || 0) < (b[i] || 0)) return false;
+  }
+  return false;
+}
+
+function sendUpdate(channel, payload) {
+  if (mainWindow) mainWindow.webContents.send(channel, payload);
+}
+
+async function findLatestRelease() {
+  const res = await fetch("https://api.github.com/repos/" + UPDATE_REPO + "/releases?per_page=10", {
+    headers: { Accept: "application/vnd.github+json", "User-Agent": "x32-fernsteuerung" },
+  });
+  if (!res.ok) throw new Error("GitHub antwortet mit Status " + res.status);
+  const releases = await res.json();
+  let best = null;
+  for (const rel of releases) {
+    if (rel.draft || rel.prerelease) continue;
+    const asset = (rel.assets || []).find((a) => a.name === UPDATE_ASSET);
+    if (!asset) continue;
+    const version = String(rel.tag_name).replace(/^v/, "");
+    if (!best || isNewer(version, best.version)) best = { version, zipUrl: asset.browser_download_url, pageUrl: rel.html_url };
+  }
+  return best;
+}
+
+async function checkForUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const latest = await findLatestRelease();
+    if (latest && isNewer(latest.version, app.getVersion())) {
+      pendingUpdate = latest;
+      sendUpdate("update-available", latest.version);
+    }
+  } catch (e) { log("Update-Prüfung fehlgeschlagen: " + e.message); }
+}
+
+function run(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, (err, stdout, stderr) => (err ? reject(new Error(cmd + ": " + (stderr || err.message))) : resolve(stdout)));
+  });
+}
+
+async function downloadAndInstall(update) {
+  const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
+  if (!bundlePath.endsWith(".app")) throw new Error("App-Pfad nicht erkannt: " + bundlePath);
+  try { fs.accessSync(path.dirname(bundlePath), fs.constants.W_OK); }
+  catch (e) {
+    shell.openExternal(update.pageUrl);
+    throw new Error("Kein Schreibzugriff auf den Ordner der App — die Download-Seite wurde geöffnet, bitte manuell installieren.");
+  }
+
+  const workDir = path.join(app.getPath("temp"), "x32-update");
+  fs.rmSync(workDir, { recursive: true, force: true });
+  fs.mkdirSync(workDir, { recursive: true });
+  const zipPath = path.join(workDir, "update.zip");
+  const extractDir = path.join(workDir, "extracted");
+
+  sendUpdate("update-progress", "Lade Update herunter... 0 %");
+  const res = await fetch(update.zipUrl, { redirect: "follow" });
+  if (!res.ok) throw new Error("Download fehlgeschlagen (Status " + res.status + ")");
+  const total = Number(res.headers.get("content-length")) || 0;
+  let received = 0, lastPercent = -1;
+  const body = Readable.fromWeb(res.body);
+  body.on("data", (chunk) => {
+    received += chunk.length;
+    const percent = total ? Math.floor((received / total) * 100) : 0;
+    if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); }
+  });
+  await pipeline(body, fs.createWriteStream(zipPath));
+
+  sendUpdate("update-progress", "Entpacke Update...");
+  await run("ditto", ["-x", "-k", zipPath, extractDir]);
+  const newApp = fs.readdirSync(extractDir).find((n) => n.endsWith(".app"));
+  if (!newApp) throw new Error("Im Update wurde keine App gefunden.");
+  const newAppPath = path.join(extractDir, newApp);
+  await run("codesign", ["--verify", "--deep", newAppPath]);
+
+  const scriptPath = path.join(workDir, "apply-update.sh");
+  const logPath = path.join(app.getPath("userData"), "update.log");
+  const script = [
+    "#!/bin/bash",
+    'PID="$1"; NEW="$2"; TARGET="$3"; LOG="$4"',
+    'exec >>"$LOG" 2>&1',
+    'echo "=== Update $(date) ==="',
+    "WAITED=0",
+    'while kill -0 "$PID" 2>/dev/null && [ "$WAITED" -lt 120 ]; do sleep 0.5; WAITED=$((WAITED+1)); done',
+    'OLD="${TARGET}.old"',
+    'rm -rf "$OLD"',
+    'if mv "$TARGET" "$OLD"; then',
+    '  if ditto "$NEW" "$TARGET"; then',
+    '    xattr -cr "$TARGET" 2>/dev/null',
+    '    rm -rf "$OLD"',
+    '    echo "Update ok"',
+    "  else",
+    '    echo "Kopieren fehlgeschlagen, Rollback"',
+    '    rm -rf "$TARGET"',
+    '    mv "$OLD" "$TARGET"',
+    "  fi",
+    "else",
+    '  echo "Verschieben der alten App fehlgeschlagen"',
+    "fi",
+    'open "$TARGET"',
+    "",
+  ].join("\n");
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+
+  sendUpdate("update-progress", "Installiere & starte neu...");
+  spawn("/bin/bash", [scriptPath, String(process.pid), newAppPath, bundlePath, logPath], { detached: true, stdio: "ignore" }).unref();
+  app.quit();
+}
+
+ipcMain.handle("install-update", async () => {
+  if (!pendingUpdate) return { ok: false, error: "Kein Update bereit." };
+  try { await downloadAndInstall(pendingUpdate); return { ok: true }; }
+  catch (e) { sendUpdate("update-error", e.message); return { ok: false, error: e.message }; }
 });
-ipcMain.handle("check-for-updates", async () => {
-  if (!app.isPackaged) return { ok: false, reason: "not-packaged" };
-  try { await autoUpdater.checkForUpdates(); return { ok: true }; }
-  catch (e) { return { ok: false, reason: e.message }; }
-});
-ipcMain.handle("install-update-now", async () => { autoUpdater.quitAndInstall(); });
+ipcMain.handle("get-version", async () => app.getVersion());
 
 app.whenReady().then(() => {
   createWindow();
-  if (app.isPackaged) autoUpdater.checkForUpdates().catch((e) => log("Update-Prüfung fehlgeschlagen: " + e.message));
+  checkForUpdate();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

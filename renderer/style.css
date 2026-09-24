@@ -42,6 +42,7 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 }
 .brand{display:flex;align-items:center;gap:10px;font-family:var(--font-head);font-size:14.5px;text-transform:uppercase;letter-spacing:0.06em;}
 .brand b{color:var(--accent);}
+.version-label{font-family:var(--font-mono);font-size:10.5px;color:var(--muted);text-transform:none;letter-spacing:0;}
 .brand-mark{width:18px;height:18px;border-radius:5px;background:linear-gradient(155deg, var(--accent), var(--accent-2));box-shadow:0 0 0 1px rgba(0,0,0,0.25) inset, 0 2px 6px -1px var(--accent-glow);}
 .conn-row{display:flex;align-items:center;gap:8px;-webkit-app-region:no-drag;flex-wrap:wrap;}
 .conn-row input{background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:8px 10px;font-family:var(--font-mono);font-size:12.5px;width:150px;}

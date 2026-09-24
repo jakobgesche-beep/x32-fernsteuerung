@@ -484,11 +484,25 @@ window.x32API.onChannelDetail((data) => {
 });
 
 // ================= Auto-Update =================
-window.x32API.onUpdateReady((version) => {
-  const bar = el('<div class="update-bar">Update ' + esc(version) + ' heruntergeladen. <button class="btn small" id="install-update-btn">Jetzt neu starten &amp; installieren</button></div>');
-  document.body.appendChild(bar);
-  bar.querySelector('#install-update-btn').addEventListener('click', () => window.x32API.installUpdateNow());
+let updateBar = null;
+window.x32API.onUpdateAvailable((version) => {
+  if(updateBar) updateBar.remove();
+  updateBar = el('<div class="update-bar"><span id="update-text">Neue Version ' + esc(version) + ' verfügbar.</span> <button class="btn small" id="install-update-btn">Jetzt aktualisieren</button></div>');
+  document.body.appendChild(updateBar);
+  updateBar.querySelector('#install-update-btn').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    const res = await window.x32API.installUpdate();
+    if(!res.ok) e.target.disabled = false;
+  });
 });
+window.x32API.onUpdateProgress((text) => {
+  if(updateBar) updateBar.querySelector('#update-text').textContent = text;
+});
+window.x32API.onUpdateError((msg) => {
+  if(updateBar) updateBar.querySelector('#update-text').textContent = 'Update fehlgeschlagen: ' + msg;
+  toast('Update fehlgeschlagen: ' + msg, true);
+});
+window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; });
 
 // ================= Aufbau =================
 function render(){

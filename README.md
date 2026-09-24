@@ -41,8 +41,13 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
   X32/M32-Konsolen (OSC `/xinfo`-Anfrage an alle Adressen im Subnetz) und
   zeigt sie zur Auswahl an — keine IP-Adresse mehr nötig, sofern der Mac
   im selben Netzwerk wie das Pult ist
-- Auto-Update wie bei der DMX-App: prüft beim Start auf GitHub nach neuen
-  Releases, lädt sie im Hintergrund, Balken zum Neustart & Installieren
+- Eigener Auto-Update: prüft beim Start auf GitHub nach einer neueren
+  Version, zeigt oben einen Balken "Jetzt aktualisieren"; ein Klick lädt
+  die neue App herunter, tauscht sie aus und startet neu (kein Terminal, keine
+  Neuinstallation). Bewusst nicht `electron-updater`: dessen macOS-Updater
+  braucht eine echte Apple-Signatur und bricht bei unserer ad-hoc-Signatur
+  stillschweigend ab. Bei Problemen steht ein Protokoll in
+  `~/Library/Application Support/X32 Fernsteuerung/update.log`.
 
 ## Setup (einmalig, braucht Node.js)
 

@@ -1,6 +1,6 @@
 {
   "name": "x32-fernsteuerung",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Native Mac-App: Fernsteuerung für das Behringer X32 (Fader, EQ, Kompressor, Pegel)",
   "main": "main.js",
   "private": true,
@@ -8,9 +8,6 @@
     "start": "electron .",
     "build": "electron-builder --mac",
     "publish": "electron-builder --mac --publish always"
-  },
-  "dependencies": {
-    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^44.0.0",
@@ -27,7 +24,10 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "artifactName": "X32-Fernsteuerung.${ext}",
       "identity": null
     },
