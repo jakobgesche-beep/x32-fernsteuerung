@@ -75,6 +75,7 @@ const X = (function () {
     want: (paths) => api.want(paths),
     refresh: (paths, urgent) => api.refresh(paths, urgent),
     setMeters: (streams) => api.setMeters(streams),
+    setSubs: (specs) => api.setSubs(specs),
     // Werte, die alle paar Sekunden erneut gelesen werden (Nachgleich)
     setHotGroup(name, paths) {
       hotGroups.set(name, paths);

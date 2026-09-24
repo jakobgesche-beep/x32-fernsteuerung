@@ -14,7 +14,7 @@ function makeRig(opts) {
   opts = opts || {};
   const events = { batches: [], meters: {}, statuses: [] };
   let client, mock;
-  mock = new MockX32({ deliver: (u8) => client.receive(u8), latency: opts.latency == null ? 2 : opts.latency, loss: opts.loss || 0 });
+  mock = new MockX32({ deliver: (u8) => client.receive(u8), latency: opts.latency == null ? 2 : opts.latency, loss: opts.loss || 0, subFormatBroken: opts.subFormatBroken });
   client = new X32Client({
     send: (u8) => mock.receive(u8),
     onBatch: (e) => events.batches.push(...e),
@@ -38,7 +38,7 @@ async function waitFor(fn, timeout) { const t0 = Date.now(); while (Date.now() -
   // T2: Erst-Abgleich aller Kanäle (Name, Farbe, Icon, Fader, Mute)
   const t0 = Date.now();
   r.client.want(basicPaths);
-  const synced = await waitFor(() => r.client.queue.length === 0 && r.client.inflight.size === 0, 8000);
+  const synced = await waitFor(() => r.client.openRequests() === 0, 8000);
   const dur = Date.now() - t0;
   check('T2 Abgleich ' + basicPaths.length + ' Werte', synced && r.client.values.size >= basicPaths.length, 'geladen ' + r.client.values.size + ' in ' + dur + ' ms, Wiederholungen ' + r.client.stats.retries);
   check('T2 Anfrage-Fenster nie über 20', r.maxInflight() <= 20, 'Maximum ' + r.maxInflight());
@@ -119,7 +119,7 @@ async function waitFor(fn, timeout) { const t0 = Date.now(); while (Date.now() -
   const bus = strips.find((s) => s.id === 'bus03'), ch = strips.find((s) => s.id === 'ch10');
   const dp = X32V.detailPaths(bus).concat(X32V.detailPaths(ch));
   r.client.want(dp);
-  await waitFor(() => r.client.queue.length === 0 && r.client.inflight.size === 0, 5000);
+  await waitFor(() => r.client.openRequests() === 0, 5000);
   check('T11 Detail-Pfade (Bus 6-Band + Kanal) geladen', dp.every((p) => r.client.values.has(p)), dp.length + ' Pfade');
   check('T11 Umrechnung Bus EQ-Band 6 Frequenz', Math.abs(X32V.fromWire('/bus/03/eq/6/f', r.client.get('/bus/03/eq/6/f')) - 14000) < 1, X32V.fromWire('/bus/03/eq/6/f', r.client.get('/bus/03/eq/6/f')).toFixed(0) + ' Hz');
   r.client.stop(); r.mock.shutdown();
@@ -132,6 +132,53 @@ async function waitFor(fn, timeout) { const t0 = Date.now(); while (Date.now() -
   const getsAfter = r.mock.log.gets;
   await sleep(8000);
   check('T12 unbeantwortete Anfrage wird nach mehreren Runden aufgegeben', r.client.dead.has('/ch/01/bogus/param') && r.mock.log.gets - getsAfter < 3, 'aufgegeben: ' + r.client.dead.size + ', weitere Anfragen danach: ' + (r.mock.log.gets - getsAfter));
+  r.client.stop(); r.mock.shutdown();
+
+  // T13: Schnappschuss-Abos: eine verlorene Pult-Meldung wird nach ~100 ms erkannt und korrigiert
+  const hotCh = strips.filter((s) => s.type === 'ch').flatMap((s) => [X32V.stripPath(s, s.faderLeaf), X32V.stripPath(s, s.onLeaf)]);
+  r = makeRig();
+  r.client.start(); await waitFor(() => r.client.state === 'online', 3000);
+  r.client.want(basicPaths);
+  await waitFor(() => r.client.openRequests() === 0, 5000);
+  r.client.setHot(hotCh);
+  r.client.setSubs(X32V.subscriptionSpecs('ch'));
+  await sleep(600);
+  check('T13 Abos angemeldet, Schnappschüsse kommen an', r.mock.subs.size === 2 && r.client.hint.lastBlobAt > 0, 'Abos am Pult: ' + r.mock.subs.size);
+  const tp = '/ch/12/mix/on', muteBefore = r.client.get(tp);
+  const tt0 = Date.now();
+  r.mock.store.set(tp, muteBefore === 1 ? 0 : 1);                  // Pult ändert sich, aber die Meldung an die App geht "verloren"
+  const found = await waitFor(() => r.client.get(tp) !== muteBefore, 1500);
+  check('T13 verlorene Mute-Meldung: per Schnappschuss erkannt', found && Date.now() - tt0 < 400, (Date.now() - tt0) + ' ms (ohne Schnappschüsse bis zu 500 ms Nachfrage-Takt)');
+  const fp = '/ch/13/mix/fader', fbefore = r.client.get(fp);
+  const tf0 = Date.now();
+  r.mock.store.set(fp, 0.33);
+  const ffound = await waitFor(() => Math.abs(r.client.get(fp) - 0.33) < 1e-6, 1500);
+  check('T13 verlorene Fader-Meldung: per Schnappschuss erkannt', ffound && Date.now() - tf0 < 400, (Date.now() - tf0) + ' ms, vorher ' + fbefore.toFixed(2));
+  check('T13 Zähler für per Schnappschuss gefundene Änderungen', r.client.stats.hintFound >= 2, 'gefunden: ' + r.client.stats.hintFound);
+  await sleep(1500);
+  const g0 = r.mock.log.gets;
+  await sleep(5000);
+  const gps = (r.mock.log.gets - g0) / 5;
+  check('T13 bei gesunden Schnappschüssen wenige Einzel-Nachfragen (unter 30/s statt ~96/s)', gps < 30, gps.toFixed(1) + ' Nachfragen/s');
+  // Netzwerk-Test (nur lesend)
+  let netRes = null; r.client.runNetworkTest((x) => { netRes = x; });
+  await waitFor(() => netRes, 6000);
+  check('T13 Netzwerk-Test liefert Ergebnis: 32/32 Einzel- und 32/32 Ansturm-Antworten', netRes && netRes.seq.got === 32 && netRes.burst.got === 32, netRes && ('Laufzeit Ø ' + netRes.seq.avg.toFixed(1) + ' ms, max ' + netRes.seq.max + ' ms, Ansturm in ' + netRes.burst.spanMs + ' ms'));
+  r.client.stop(); r.mock.shutdown();
+
+  // T14: unbrauchbare Schnappschüsse (falsches Format) werden abgeschaltet, Nachfragen fängt es weiter auf
+  r = makeRig({ subFormatBroken: true });
+  r.client.start(); await waitFor(() => r.client.state === 'online', 3000);
+  r.client.want(basicPaths); await waitFor(() => r.client.openRequests() === 0, 5000);
+  r.client.setHot(hotCh);
+  r.client.setSubs(X32V.subscriptionSpecs('ch'));
+  const disabled = await waitFor(() => r.client.hint.disabled, 4000);
+  check('T14 unbrauchbares Schnappschuss-Format: Abos werden abgeschaltet', disabled, 'badFormat ' + r.client.hint.badFormat);
+  const tp2 = '/ch/20/mix/on', b2 = r.client.get(tp2), tq = Date.now();
+  r.mock.store.set(tp2, b2 === 1 ? 0 : 1);
+  const found2 = await waitFor(() => r.client.get(tp2) !== b2, 2500);
+  check('T14 Änderung wird trotzdem durch Nachfragen gefunden', found2 && Date.now() - tq < 1200, (Date.now() - tq) + ' ms');
+  check('T14 keine falschen Werte durch das kaputte Format', r.client.get('/ch/01/mix/on') === r.mock.store.get('/ch/01/mix/on'));
   r.client.stop(); r.mock.shutdown();
 
   out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');

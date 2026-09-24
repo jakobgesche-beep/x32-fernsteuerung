@@ -102,7 +102,7 @@
     { id: "ch", label: "Kanäle" },
     { id: "aux", label: "Aux / FX" },
     { id: "bus", label: "Bus" },
-    { id: "mtx", label: "Matrix / Main" },
+    { id: "mtx", label: "Matrix" },
     { id: "dca", label: "DCA" },
   ];
 
@@ -126,6 +126,24 @@
       if (s.gateGr && !Array.isArray(s.gateGr.idx)) s.gateGr.idx = [s.gateGr.idx];
     });
     return strips;
+  };
+
+  // Schnappschuss-Abos (/formatsubscribe) für die sichtbare Ebene: Mute- und Fader-Werte aller Züge in je einem Paket
+  V.subscriptionSpecs = function (layerId) {
+    const specs = [];
+    const add = (tag, prefix, n) => {
+      specs.push({ alias: "/xm_" + tag, pattern: prefix + "/mix/on", i0: 1, i1: n, kind: "int", tf: 2 });
+      specs.push({ alias: "/xf_" + tag, pattern: prefix + "/mix/fader", i0: 1, i1: n, kind: "float", tf: 2 });
+    };
+    if (layerId === "ch") add("ch", "/ch/**", 32);
+    else if (layerId === "aux") { add("aux", "/auxin/**", 8); add("fx", "/fxrtn/**", 8); }
+    else if (layerId === "bus") add("bus", "/bus/**", 16);
+    else if (layerId === "mtx") add("mtx", "/mtx/**", 6);
+    else if (layerId === "dca") {
+      specs.push({ alias: "/xm_dca", pattern: "/dca/*/on", i0: 1, i1: 8, kind: "int", tf: 2 });
+      specs.push({ alias: "/xf_dca", pattern: "/dca/*/fader", i0: 1, i1: 8, kind: "float", tf: 2 });
+    }
+    return specs;
   };
 
   V.stripPath = (strip, leaf) => strip.base + "/" + leaf;

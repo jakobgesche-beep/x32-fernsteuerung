@@ -38,14 +38,18 @@ let lastState = 'idle';
 
 function updateStatus(s){
   const st = s.state;
-  statusBadge.classList.remove('live', 'warn', 'bad');
+  statusBadge.classList.remove('live', 'warn', 'bad', 'ping-good', 'ping-mid', 'ping-bad');
+  const consoleEl = document.getElementById('console');
+  consoleEl.classList.toggle('offline', st === 'idle');
+  consoleEl.classList.toggle('reconnecting', st === 'lost' || st === 'connecting');
   let text = 'nicht verbunden';
   if(st === 'connecting'){ text = 'Verbinde…'; statusBadge.classList.add('warn'); }
   else if(st === 'lost'){ text = 'Verbindung verloren – suche…'; statusBadge.classList.add('bad'); }
   else if(st === 'online'){
     statusBadge.classList.add('live');
     if(s.progress < 1 && s.open > 40) text = 'Synchronisiere ' + Math.round(s.progress * 100) + ' %';
-    else text = 'Verbunden' + (s.info && s.info.model ? ' · ' + s.info.model : '') + (s.rtt != null ? ' · ' + Math.round(s.rtt) + ' ms' : '');
+    else text = 'Verbunden' + (s.info && s.info.model ? ' · ' + s.info.model : '') + (s.rtt != null ? ' · ' + Math.round(s.rtt) + ' ms' : '') + (s.loss != null && s.loss >= 2 ? ' · ' + Math.round(s.loss) + ' % Verlust' : '');
+    if(s.rtt != null) statusBadge.classList.add(s.rtt < 15 && !(s.loss >= 5) ? 'ping-good' : s.rtt < 40 && !(s.loss >= 10) ? 'ping-mid' : 'ping-bad');
   }
   statusText.textContent = text;
   connectBtn.textContent = st === 'idle' ? 'Verbinden' : 'Trennen';
@@ -55,6 +59,8 @@ function updateStatus(s){
 }
 let diagOverlay = null;
 X.onStatus((s) => { updateStatus(s); if(diagOverlay) renderDiagnostics(s); });
+
+document.getElementById('hint-scan-btn').addEventListener('click', () => scanBtn.click());
 
 // Verbindungs-Diagnose (Klick auf den Status-Balken)
 function diagRow(k, v){ return '<div class="diag-k">' + esc(k) + '</div><div class="diag-v">' + esc(v) + '</div>'; }
@@ -67,7 +73,10 @@ function renderDiagnostics(s){
     diagRow('Pult', [info.model, info.name].filter(Boolean).join(' · ') || '–') +
     diagRow('Firmware', info.version || '–') +
     diagRow('Pult-IP', info.ip || '–') +
-    diagRow('Ping', s.rtt != null ? Math.round(s.rtt) + ' ms' : '–') +
+    diagRow('Ping (Ø / 95 % / max)', s.rttStats ? Math.round(s.rttStats.avg) + ' / ' + Math.round(s.rttStats.p95) + ' / ' + Math.round(s.rttStats.max) + ' ms' : '–') +
+    diagRow('Paketverlust (Ping)', s.loss != null ? Math.round(s.loss) + ' %' : '–') +
+    diagRow('Pult meldet Änderungen selbst', st.pushChanges > 0 ? 'ja (' + st.pushChanges + ' erhalten)' : s.pushBroken ? 'nein – es wird schneller nachgefragt' : 'noch keine Änderung am Pult beobachtet') +
+    diagRow('Schnappschüsse (Sicherheitsnetz)', s.hints ? (s.hints.disabled ? 'abgeschaltet (Format passte nicht)' : s.hints.active ? 'aktiv, ' + s.hints.found + ' verlorene Meldungen aufgefangen' : 'aus') : '–') +
     diagRow('Bekannte / geladene Werte', (s.known || 0) + ' / ' + (s.cached || 0)) +
     diagRow('Offene Anfragen', String(s.open || 0)) +
     diagRow('Pakete gesendet / empfangen', (st.sent || 0) + ' / ' + (st.received || 0)) +
@@ -77,10 +86,35 @@ function renderDiagnostics(s){
     diagRow('Verlorene Änderungen erneut gesendet', String(st.resends || 0)) +
     diagRow('Pfade ohne Antwort vom Pult', (s.dead || []).length ? s.dead.join(', ') : 'keine');
 }
+// Netzwerk-Test (nur lesend): misst Laufzeit, Schwankung und Verlust zwischen App und Pult
+async function runNetTest(){
+  const btn = document.getElementById('net-test-btn'), out = document.getElementById('net-test-result');
+  if(!btn) return;
+  btn.disabled = true; btn.textContent = 'Test läuft…'; out.innerHTML = '';
+  const res = await window.x32API.networkTest();
+  if(!diagOverlay) return;
+  btn.disabled = false; btn.textContent = 'Netzwerk-Test wiederholen';
+  if(!res){ out.textContent = 'Test nicht möglich (nicht mit dem Pult verbunden oder läuft schon).'; return; }
+  const q = res.seq, b = res.burst;
+  const good = q.avg < 15 && q.lossPct < 2 && b.lossPct < 5, ok = q.avg < 40 && q.lossPct < 8 && b.lossPct < 15;
+  const verdict = good ? 'Sehr gut: Fader und Mute laufen praktisch verzögerungsfrei.'
+    : ok ? 'Brauchbar: kleine Verzögerungen möglich. Näher an den Router gehen oder das 5-GHz-Netz nutzen hilft.'
+    : 'Schlecht: Pakete gehen verloren oder kommen spät an. Kabel zum Router oder 5-GHz-WLAN in kurzer Entfernung nutzen.';
+  out.innerHTML = '<div class="net-verdict ' + (good ? 'good' : ok ? 'mid' : 'bad') + '">' + esc(verdict) + '</div>' +
+    '<div class="diag-grid">' +
+    diagRow('Einzelanfragen beantwortet', q.got + ' von ' + q.sent + ' (' + Math.round(q.lossPct) + ' % Verlust)') +
+    diagRow('Laufzeit Ø / min / max', q.got ? Math.round(q.avg) + ' / ' + Math.round(q.min) + ' / ' + Math.round(q.max) + ' ms' : '–') +
+    diagRow('Schwankung', q.jitter != null ? Math.round(q.jitter) + ' ms' : '–') +
+    diagRow('Ansturm (32 auf einmal)', b.got + ' von ' + b.sent + (b.spanMs != null ? ' in ' + Math.round(b.spanMs) + ' ms' : '')) + '</div>';
+}
+
 function showDiagnostics(){
   if(diagOverlay) return;
   diagOverlay = el('<div class="overlay"></div>');
-  const box = el('<div class="detail-card" style="max-width:520px;"><div class="detail-header"><div class="detail-title">Verbindungs-Diagnose</div></div><div class="diag-body diag-grid"></div><p class="hint">Bei Problemen hilft ein Foto dieses Fensters.</p></div>');
+const box = el('<div class="detail-card" style="max-width:560px;"><div class="detail-header"><div class="detail-title">Verbindungs-Diagnose</div></div><div class="diag-body diag-grid"></div>' +
+    '<div class="diag-test"><button class="btn small" id="net-test-btn">Netzwerk-Test starten (3 Sekunden)</button><div id="net-test-result" class="net-result"></div></div>' +
+    '<p class="hint">Bei Problemen hilft ein Foto dieses Fensters.</p></div>');
+  box.querySelector('#net-test-btn').addEventListener('click', runNetTest);
   const closeBtn = el('<button class="close-btn">&times;</button>');
   const close = () => { diagOverlay.remove(); diagOverlay = null; };
   closeBtn.addEventListener('click', close);
@@ -96,10 +130,14 @@ statusBadge.addEventListener('click', showDiagnostics);
 
 // alle Kanäle laden: sichtbare Ebene zuerst
 function wantAll(){
+  X.setSubs(X32V.subscriptionSpecs(currentLayer));
+  X.want(dockStrips.flatMap((s) => X32V.basicPaths(s)));
   const order = X32V.LAYERS.map((l) => l.id).sort((a, b) => (a === currentLayer ? -1 : b === currentLayer ? 1 : 0));
   order.forEach((id) => X.want(layerPaths(id)));
 }
-function layerStrips(id){ return STRIPS.filter((s) => s.layer === id); }
+const DOCK_IDS = ['st', 'mono'];
+function layerStrips(id){ return STRIPS.filter((s) => s.layer === id && !DOCK_IDS.includes(s.id)); }
+const dockStrips = STRIPS.filter((s) => DOCK_IDS.includes(s.id));
 function layerPaths(id){ return layerStrips(id).flatMap((s) => X32V.basicPaths(s)); }
 
 async function connectTo(ip){
@@ -155,6 +193,7 @@ scanBtn.addEventListener('click', async () => {
 // ================= Ebenen & Fader-Streifen =================
 let currentLayer = 'ch';
 let stripUI = {};
+const dockUI = {};
 let unsubscribers = [];
 
 function buildStrip(strip){
@@ -246,13 +285,28 @@ function setLayer(id){
   });
   app.innerHTML = '';
   app.appendChild(row);
-  if(X.status().state === 'online') X.want(layerPaths(id));
+  if(X.status().state === 'online') X.want(layerPaths(id).concat(dockStrips.flatMap((s) => X32V.basicPaths(s))));
+  X.setSubs(X32V.subscriptionSpecs(id));
   updateHot();
 }
 
 // Werte, die regelmäßig nachgelesen werden: Fader/Mute der sichtbaren Ebene
 function updateHot(){
-  X.setHotGroup('layer', layerStrips(currentLayer).flatMap((s) => [X32V.stripPath(s, s.faderLeaf), X32V.stripPath(s, s.onLeaf)]));
+  X.setHotGroup('layer', layerStrips(currentLayer).concat(dockStrips).flatMap((s) => [X32V.stripPath(s, s.faderLeaf), X32V.stripPath(s, s.onLeaf)]));
+}
+
+// Main LR und Mono: fest am rechten Rand, auf jeder Ebene sichtbar
+function buildDock(){
+  const dock = document.getElementById('dock');
+  const row = el('<div class="dock-strips"></div>');
+  dockStrips.forEach((strip) => {
+    const ui = buildStrip(strip);
+    dockUI[strip.id] = ui;
+    row.appendChild(ui.wrap);
+    paintStrip(ui);
+    X.subscribe(strip.base + '/', () => paintStrip(ui));
+  });
+  dock.appendChild(row);
 }
 
 function buildLayerTabs(){
@@ -265,8 +319,8 @@ function buildLayerTabs(){
 
 // Pegel auf die sichtbaren Streifen verteilen
 X.onMeter((id, floats) => {
-  for(const sid in stripUI){
-    const ui = stripUI[sid], m = ui.strip.meter;
+  for(const ui of Object.values(stripUI).concat(Object.values(dockUI))){
+    const m = ui.strip.meter;
     if(!m || m.stream !== id) continue;
     m.idx.forEach((idx, i) => { if(ui.fills[i] && idx < floats.length) ui.fills[i].style.height = (100 - levelToPct(floats[idx])).toFixed(0) + '%'; });
   }
@@ -297,5 +351,6 @@ window.x32API.getVersion().then((v) => { document.getElementById('version-label'
 
 // ================= Start =================
 buildLayerTabs();
+buildDock();
 setLayer('ch');
 X.loadSnapshot().then(() => { STRIPS.forEach((s) => { if(stripUI[s.id]) paintStrip(stripUI[s.id]); }); });

@@ -35,6 +35,8 @@ window.__mockInit = (mock) => {
 };
 
 (async () => {
+  if(params.get('view') === 'offline'){ return; }
+  const wasOffline = document.getElementById('console').classList.contains('offline');
   document.getElementById('ip-input').value = '10.0.0.5';
   document.getElementById('connect-btn').click();
   const online = await waitFor(() => X.status().state === 'online' && X.status().progress >= 1, 10000);
@@ -43,6 +45,8 @@ window.__mockInit = (mock) => {
 
   if(params.get('test')){
     check('verbunden und synchronisiert', online, JSON.stringify({ state: X.status().state, rtt: X.status().rtt && Math.round(X.status().rtt) }));
+    check('Startzustand: Pult-Fläche gedimmt mit Hinweis, nach dem Verbinden frei', wasOffline && !document.getElementById('console').classList.contains('offline'));
+    check('Status-Ampel: guter Ping ist grün', document.getElementById('status-badge').classList.contains('ping-good'), document.getElementById('status-text').textContent);
     check('Statusanzeige', /Verbunden · X32C/.test(document.getElementById('status-text').textContent), document.getElementById('status-text').textContent);
     // Kanal-Ebene
     const u2 = stripUI['ch02'];
@@ -122,6 +126,34 @@ window.__mockInit = (mock) => {
     diagOverlay.querySelector('.close-btn').click();
     check('Diagnose-Fenster lässt sich schließen', diagOverlay === null);
 
+    // Main-Bereich (Dock) auf jeder Ebene sichtbar und bedienbar
+    const dockVisible = () => ['st', 'mono'].every((id) => { const r = dockUI[id].wrap.getBoundingClientRect(); return r.width > 50 && r.height > 100; });
+    let allLayers = true;
+    for (const l of ['ch', 'aux', 'bus', 'mtx', 'dca']) { setLayer(l); await sleep(60); if (!dockVisible()) allLayers = false; }
+    check('Main LR und Mono sind auf jeder Ebene sichtbar', allLayers);
+    dockUI['st'].fader.value = 0.6; dockUI['st'].fader.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(80);
+    check('Main-Fader (Dock) schreibt /main/st/mix/fader', Math.abs((__ctl.mock.store.get('/main/st/mix/fader') || 0) - 0.6) < 1e-6);
+    dockUI['mono'].muteBtn.click(); await sleep(80);
+    check('Mono-Mute (Dock) schaltet am Pult', __ctl.mock.store.get('/main/m/mix/on') === 0);
+    __ctl.mock.surfaceChange('/main/st/mix/on', 0);
+    const seenMute = await waitFor(() => dockUI['st'].wrap.classList.contains('muted'), 400);
+    check('Main-Mute am Pult gedrückt: Dock zeigt es sofort', seenMute);
+    // Schnappschuss-Abos folgen der sichtbaren Ebene
+    setLayer('bus'); await sleep(200);
+    check('Abos für die sichtbare Ebene am Pult angemeldet (Bus)', __ctl.mock.subs.has('/xm_bus') && __ctl.mock.subs.has('/xf_bus'), Array.from(__ctl.mock.subs.keys()).join(', '));
+    setLayer('ch'); await sleep(100);
+
+    // Diagnose: erweiterte Werte und Netzwerk-Test
+    document.getElementById('status-badge').click(); await sleep(150);
+    const dtext = diagOverlay.textContent;
+    check('Diagnose zeigt Ping-Statistik, Verlust und Schnappschüsse', /Ping \(Ø \/ 95 % \/ max\)/.test(dtext) && /Paketverlust/.test(dtext) && /Schnappschüsse/.test(dtext));
+    document.getElementById('net-test-btn').click();
+    const netDone = await waitFor(() => /Einzelanfragen beantwortet/.test(document.getElementById('net-test-result').textContent), 8000);
+    const ntext = document.getElementById('net-test-result').textContent;
+    check('Netzwerk-Test: Ergebnis mit Bewertung', netDone && /32 von 32/.test(ntext) && /Sehr gut/.test(ntext), ntext.replace(/\s+/g, ' ').slice(0, 130));
+    diagOverlay.querySelector('.close-btn').click();
+
     // Regressionstest: Fader angeklickt (behält Fokus), danach am Pult verschoben -> App muss folgen
     const fe = stripUI['ch09'].fader; fe.focus();
     fe.capElement.dispatchEvent(new PointerEvent('pointerdown', { clientY: fe.yForT(parseFloat(fe.value)), pointerId: 1, bubbles: true }));
@@ -141,7 +173,7 @@ window.__mockInit = (mock) => {
     setLayer('bus'); await sleep(400);
     check('Bus-Ebene: 16 Züge, Namen', Object.keys(stripUI).length === 16 && stripUI['bus03'].name.textContent === 'Mon 3', Object.keys(stripUI).length + ' / ' + stripUI['bus03'].name.textContent);
     setLayer('mtx'); await sleep(400);
-    check('Matrix/Main: 8 Züge, Main LR mit 2 Pegelbalken', Object.keys(stripUI).length === 8 && stripUI['st'].fills.length === 2 && stripUI['mono'].fills.length === 1, Object.keys(stripUI).length + ' Züge');
+    check('Matrix: 6 Züge; Main LR (2 Pegelbalken) und Mono fest im rechten Bereich', Object.keys(stripUI).length === 6 && dockUI['st'].fills.length === 2 && dockUI['mono'].fills.length === 1, Object.keys(stripUI).length + ' Züge, Dock: ' + Object.keys(dockUI).join(','));
     setLayer('dca'); await sleep(300);
     check('DCA: 8 Züge ohne Pegelbalken', Object.keys(stripUI).length === 8 && stripUI['dca1'].fills.length === 0 && stripUI['dca1'].name.textContent === 'Drums');
     stripUI['dca1'].fader.value = 0.4; stripUI['dca1'].fader.dispatchEvent(new Event('input', { bubbles: true }));
@@ -229,10 +261,11 @@ window.__mockInit = (mock) => {
 
   // ---- Ansichten für Screenshots ----
   if(view === 'diag'){ document.getElementById('status-badge').click(); await sleep(400); }
+  if(view === 'nettest'){ document.getElementById('status-badge').click(); await sleep(200); document.getElementById('net-test-btn').click(); await sleep(4500); }
   if(['aux', 'bus', 'mtx', 'dca'].includes(view)) setLayer(view);
   if(view.startsWith('eq-') || view.startsWith('dyn-') || view.startsWith('cfg-')){
     const id = { 'cfg-ch1': 'ch01', 'eq-ch2': 'ch02', 'eq-bus3': 'bus03', 'eq-main': 'st', 'dyn-bus3': 'bus03', 'dyn-ch2': 'ch02' }[view];
-    if(id.startsWith('bus')) setLayer('bus'); else if(id === 'st') setLayer('mtx');
+    if(id.startsWith('bus')) setLayer('bus');
     openDetail(STRIP_BY_ID[id]);
     await sleep(500);
     if(view.startsWith('dyn-')) setTab('dyn');

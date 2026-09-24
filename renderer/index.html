@@ -22,7 +22,15 @@
   </header>
 
   <nav id="layer-tabs" class="layer-tabs"></nav>
-  <main id="app" class="app"></main>
+  <div id="console" class="console offline">
+    <main id="app" class="app"></main>
+    <aside id="dock" class="dock" aria-label="Main"></aside>
+    <div id="connect-hint" class="connect-hint">
+      <div class="hint-title">Nicht mit einem Pult verbunden</div>
+      <p>Mac und X32 müssen im selben Netzwerk sein (z. B. im WLAN des Pult-Routers).</p>
+      <button id="hint-scan-btn" class="btn">Pult suchen</button>
+    </div>
+  </div>
 
   <script src="../shared/values.js"></script>
   <script src="icons.js"></script>

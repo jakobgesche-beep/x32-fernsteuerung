@@ -7,12 +7,24 @@
   else root.MockX32 = factory(root.X32OSC, root.X32V);
 })(typeof self !== "undefined" ? self : this, function (OSC, V) {
   const METER_SIZES = { "0": 70, "1": 96, "2": 49 };
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
 
   class MockX32 {
+    // opts.profile (WLAN/Pult-Modell): base = feste Laufzeit je Richtung (ms), jitterMean = mittlere
+    // zufällige Zusatzverzögerung (exponential), spikeProb/spikeMs = gelegentliche Ausreißer, loss =
+    // Paketverlust je Richtung, capacity = wie viele Nachrichten pro Sekunde das Pult verarbeiten kann.
     constructor(opts) {
       this.deliver = opts.deliver;          // (u8) -> Client
-      this.latency = opts.latency == null ? 2 : opts.latency;
-      this.loss = opts.loss || 0;
+      this.profile = Object.assign({ base: opts.latency == null ? 2 : opts.latency, jitterMean: 0, spikeProb: 0, spikeMs: 0, loss: opts.loss || 0, capacity: 5000 }, opts.profile || {});
+      this.rng = mulberry32(opts.seed == null ? 20260924 : opts.seed);
+      this.busyUntil = 0;
       this.online = true;
       this.store = new Map();               // Pfad -> Pult-Wert
       this.xremoteUntil = 0;
@@ -21,10 +33,13 @@
       this.dropNextSetOf = null;
       this.maxOutstanding = 0;
       this.initDefaults();
+      this.subs = new Map();                // Alias -> {pattern,i0,i1,tf,until,next}
+      this.subFormatBroken = !!opts.subFormatBroken;   // Test: Pult liefert unbrauchbare Schnappschüsse
       this.meterTimer = setInterval(() => this.pushMeters(), 50);
+      this.subTimer = setInterval(() => this.pushSubs(), 25);
     }
 
-    shutdown() { clearInterval(this.meterTimer); }
+    shutdown() { clearInterval(this.meterTimer); clearInterval(this.subTimer); }
 
     initDefaults() {
       const put = (path, actual) => { const w = V.toWire(path, actual); this.store.set(path, w.value); };
@@ -62,16 +77,27 @@
     }
 
     // ---------- Netzwerk ----------
-    receive(u8) {                                    // Client -> Pult
-      if (!this.online) return;
-      if (this.loss && Math.random() < this.loss) return;
-      setTimeout(() => this.handle(u8), this.latency);
+    delay() {
+      const p = this.profile;
+      let d = p.base;
+      if (p.jitterMean) d += -Math.log(1 - this.rng()) * p.jitterMean;
+      if (p.spikeProb && this.rng() < p.spikeProb) d += p.spikeMs * (0.5 + this.rng());
+      return d;
+    }
+    lost() { return this.profile.loss > 0 && this.rng() < this.profile.loss; }
+    receive(u8) {                                    // Client -> Pult (Netz, dann Warteschlange im Pult)
+      if (!this.online || this.lost()) return;
+      setTimeout(() => {
+        const arrive = performance.now();
+        const start = Math.max(arrive, this.busyUntil);
+        this.busyUntil = start + 1000 / this.profile.capacity;   // Pult arbeitet Nachrichten nacheinander ab
+        setTimeout(() => this.handle(u8), Math.max(0, this.busyUntil - arrive));
+      }, this.delay());
     }
     reply(address, args) {                           // Pult -> Client
-      if (!this.online) return;
-      if (this.loss && Math.random() < this.loss) return;
+      if (!this.online || this.lost()) return;
       const bytes = OSC.encodeMessage(address, args);
-      setTimeout(() => { if (this.online) this.deliver(bytes); }, this.latency);
+      setTimeout(() => { if (this.online) this.deliver(bytes); }, this.delay());
     }
     typeOf(path) { const s = V.specOf(path); return s && (s.kind === "enum" || s.kind === "int") ? "i" : s && s.kind === "string" ? "s" : "f"; }
 
@@ -81,6 +107,19 @@
       const a = m.address;
       if (a === "/xinfo") { this.log.xinfo++; this.reply("/xinfo", ["192.168.1.62", "X32-MOCK", "X32C", "4.06"].map((v) => ({ type: "s", value: v }))); return; }
       if (a === "/xremote") { this.log.xremote++; this.xremoteUntil = Date.now() + 10000; return; }
+      if (a === "/formatsubscribe") {                // ,ssiii alias pattern i0 i1 tf
+        const [alias, pattern, i0, i1, tf] = m.args.map((x) => x.value);
+        this.log.formatsubscribe = (this.log.formatsubscribe || 0) + 1;
+        this.subs.set(alias, { pattern, i0, i1, tf: tf || 0, until: Date.now() + 10000, next: 0 });
+        return;
+      }
+      if (a === "/renew") {
+        const alias = m.args[0] && m.args[0].value;
+        const s = this.subs.get(alias);
+        this.log.renew = (this.log.renew || 0) + 1;
+        if (s) s.until = Date.now() + 10000;
+        return;
+      }
       if (a === "/meters") {
         this.log.meters++;
         const id = m.args[0].value.replace("/meters/", "");
@@ -98,6 +137,7 @@
       this.store.set(a, value);
       const rec = this.log.sets.get(a) || { count: 0, last: null };
       rec.count++; rec.last = value; rec.at = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (this.log.applied) this.log.applied.push([rec.at, a, value]);
       this.log.sets.set(a, rec);
     }
 
@@ -105,6 +145,31 @@
     surfaceChange(path, value) {
       this.store.set(path, value);
       if (Date.now() < this.xremoteUntil) this.reply(path, [{ type: this.typeOf(path), value }]);
+    }
+
+    // Periodische Schnappschüsse für /formatsubscribe: Blob aus <int32 LE Länge in Bytes><Werte>, Werte je nach Typ Int oder Float (little endian)
+    pushSubs() {
+      if (!this.online) return;
+      const now = Date.now();
+      for (const [alias, s] of this.subs) {
+        if (now > s.until) { this.subs.delete(alias); continue; }
+        if (now < s.next) continue;
+        s.next = now + Math.max(1, s.tf) * 50;
+        const stars = (s.pattern.match(/\*+/) || ["*"])[0].length;
+        const paths = [];
+        for (let i = s.i0; i <= s.i1; i++) paths.push(s.pattern.replace(/\*+/, String(i).padStart(stars, "0")));
+        const isFloat = this.typeOf(paths[0]) === "f";
+        const bytes = new Uint8Array(4 + paths.length * 4);
+        const dv = new DataView(bytes.buffer);
+        dv.setInt32(0, bytes.length, true);
+        paths.forEach((p, k) => {
+          let v = this.store.get(p);
+          if (v === undefined) v = 0;
+          if (this.subFormatBroken) v = 123456;          // absichtlich unbrauchbar
+          if (isFloat) dv.setFloat32(4 + k * 4, v, true); else dv.setInt32(4 + k * 4, v, true);
+        });
+        this.reply(alias, [{ type: "b", value: bytes }]);
+      }
     }
 
     pushMeters() {

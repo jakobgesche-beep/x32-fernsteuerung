@@ -1,0 +1,114 @@
+<!DOCTYPE html><html><body><pre id="out"></pre>
+<script src="../shared/osc.js"></script>
+<script src="../shared/values.js"></script>
+<script src="../shared/client.js"></script>
+<script src="mock-console.js"></script>
+<script>
+// Latenz-Messung gegen das simulierte Pult unter verschiedenen Netz-/Pult-Bedingungen.
+// A: Mute am Pult gedrückt -> wann zeigt es die App?   B: Fader in der App gezogen -> wie stark hinkt der Wert am Pult hinterher?
+const out = []; let fails = 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const pct = (arr, p) => { if (!arr.length) return NaN; const s = arr.slice().sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
+const f1 = (v) => (isNaN(v) ? '  –  ' : v.toFixed(1).padStart(6));
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FEHLER') + ' ' + name + (detail ? '  ' + detail : '')); }
+async function waitFor(fn, timeout){ const t0 = performance.now(); while (performance.now() - t0 < timeout) { if (fn()) return true; await sleep(15); } return false; }
+
+const strips = X32V.buildStrips();
+const chStrips = strips.filter((s) => s.type === 'ch');
+const hot = chStrips.flatMap((s) => [X32V.stripPath(s, s.faderLeaf), X32V.stripPath(s, s.onLeaf)]);
+const basics = strips.flatMap((s) => X32V.basicPaths(s));
+
+const PROFILES = [
+  { name: 'LAN (Kabel)',     p: { base: 0.5, jitterMean: 0.3, loss: 0, capacity: 3000 },
+    A: { p95: 30, max: 60 },   B: { p95: 40, settle: 150 } },
+  { name: 'WLAN gut',        p: { base: 3, jitterMean: 2, spikeProb: 0.01, spikeMs: 30, loss: 0.01, capacity: 1500 },
+    A: { p95: 40, max: 700 },  B: { p95: 60, settle: 500 } },
+  { name: 'WLAN mäßig',      p: { base: 6, jitterMean: 8, spikeProb: 0.04, spikeMs: 120, loss: 0.05, capacity: 1000 },
+    A: { p95: 130, max: 700 }, B: { p95: 130, settle: 900 } },
+  { name: 'WLAN schlecht',   p: { base: 10, jitterMean: 15, spikeProb: 0.08, spikeMs: 250, loss: 0.15, capacity: 800 },
+    A: { p95: 600, max: 1500 }, B: { p95: 400, settle: 1500 } },
+  { name: 'langsames Pult (150 Nachrichten/s)', p: { base: 3, jitterMean: 2, loss: 0.01, capacity: 150 },
+    A: { p95: 150, max: 900 }, B: { p95: 250, settle: 800 } },
+];
+
+async function runProfile(prof) {
+  let client, mock, batchFns = [];
+  mock = new MockX32({ deliver: (u8) => client.receive(u8), profile: prof.p, seed: 777 });
+  mock.log.applied = [];
+  client = new X32Client({ send: (u8) => mock.receive(u8), onBatch: (e) => batchFns.forEach((fn) => fn(e)) });
+  client.start();
+  const online = await waitFor(() => client.state === 'online', 8000);
+  client.want(basics); client.setHot(hot); client.setSubs(X32V.subscriptionSpecs('ch'));
+  await waitFor(() => client.openRequests() === 0 && basics.every((p) => client.values.has(p)), 40000);
+  await sleep(1500);
+
+  // ---- A: Pult -> App (Mute) ----
+  const lat = []; let missed = 0;
+  const N = 80;
+  for (let k = 0; k < N; k++) {
+    const path = '/ch/' + String((k * 7) % 32 + 1).padStart(2, '0') + '/mix/on';
+    const v = mock.store.get(path) === 1 ? 0 : 1;
+    let seen = null; const t0 = performance.now();
+    const fn = (entries) => { for (const [p, val] of entries) if (p === path && val === v && seen === null) seen = performance.now() - t0; };
+    batchFns.push(fn);
+    mock.surfaceChange(path, v);
+    const ok = await waitFor(() => seen !== null, 3000);
+    batchFns.splice(batchFns.indexOf(fn), 1);
+    if (ok) lat.push(seen); else missed++;
+    await sleep(180 + (k % 5) * 60);
+  }
+
+  // ---- B: App -> Pult (Fader ziehen) ----
+  const path = '/ch/05/mix/fader';
+  mock.log.applied.length = 0;
+  const getsBefore = mock.log.gets;
+  const sentAt = new Map();          // Wert (float32) -> Zeitpunkt, an dem die App ihn gesetzt hat
+  const t0 = performance.now();
+  let last = 0.5;
+  while (performance.now() - t0 < 2500) {
+    const el = (performance.now() - t0) / 1000;
+    last = 0.5 + 0.4 * Math.sin(2 * Math.PI * 0.8 * el);
+    sentAt.set(Math.fround(last), performance.now());
+    client.set(path, 'f', last);
+    await sleep(16);
+  }
+  const tLast = performance.now();
+  const lags = [];
+  for (const [at, p, value] of mock.log.applied) {
+    if (p !== path) continue;
+    const ta = sentAt.get(Math.fround(value));
+    if (ta !== undefined) lags.push(at - ta);
+  }
+  const appliedCount = mock.log.applied.filter((x) => x[1] === path).length;
+  const settled = await waitFor(() => Math.abs(mock.store.get(path) - last) < 1e-5, 4000);
+  const settleMs = settled ? performance.now() - tLast : NaN;
+  const getsDuring = mock.log.gets - getsBefore;
+  client.stop(); mock.shutdown();
+  return { online, lat, missed, N, lags, appliedCount, settleMs, getsDuring };
+}
+
+(async () => {
+  out.push('Latenz-Messung gegen das simulierte X32 (alle Zeiten in Millisekunden)');
+  out.push('');
+  out.push('Profil                                   | A) Mute vom Pult -> App: p50   p95   max  verpasst | B) Fader App -> Pult: p50   p95   max  Endwert nach | Pakete');
+  out.push('-----------------------------------------|------------------------------------------------------|-----------------------------------------------------|--------');
+  const results = [];
+  for (const prof of PROFILES) {
+    const r = await runProfile(prof);
+    results.push([prof, r]);
+    out.push(prof.name.padEnd(40) + ' |' + f1(pct(r.lat, 0.5)) + f1(pct(r.lat, 0.95)) + f1(Math.max(...r.lat)) + String(r.missed).padStart(8) + '   |' + f1(pct(r.lags, 0.5)) + f1(pct(r.lags, 0.95)) + f1(Math.max(...r.lags)) + f1(r.settleMs).padStart(12) + '     | ' + r.appliedCount + ' Schreib-, ' + r.getsDuring + ' Lesepakete');
+  }
+  out.push('');
+  for (const [prof, r] of results) {
+    const a95 = pct(r.lat, 0.95), amax = Math.max(...r.lat), b95 = pct(r.lags, 0.95);
+    check(prof.name + ': Mute vom Pult, p95 <= ' + prof.A.p95 + ' ms und nie verpasst', r.online && a95 <= prof.A.p95 && r.missed === 0, 'p95 ' + a95.toFixed(1) + ' ms, verpasst ' + r.missed);
+    check(prof.name + ': Mute vom Pult, langsamster <= ' + prof.A.max + ' ms', amax <= prof.A.max, 'max ' + amax.toFixed(1) + ' ms');
+    check(prof.name + ': Fader-Ziehen, Verzögerung p95 <= ' + prof.B.p95 + ' ms', b95 <= prof.B.p95, 'p95 ' + b95.toFixed(1) + ' ms');
+    check(prof.name + ': Fader-Endwert am Pult nach <= ' + prof.B.settle + ' ms', r.settleMs <= prof.B.settle, r.settleMs.toFixed(0) + ' ms');
+    const maxGets = prof.p.loss >= 0.05 ? 30 : 6;
+    check(prof.name + ': beim Ziehen ruhen Hintergrundabfragen (<= ' + maxGets + ' Lesepakete)', r.getsDuring <= maxGets, r.getsDuring + ' Lesepakete (bei Paketverlust sind Wiederholungen offener Anfragen normal)');
+  }
+  out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Latenz-Anforderungen erfüllt');
+  document.getElementById('out').textContent = out.join('\n');
+})();
+</script></body></html>

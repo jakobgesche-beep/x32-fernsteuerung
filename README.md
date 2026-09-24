@@ -19,15 +19,24 @@ Bitfocus-Companion-Modul:
 - **Anfragen im Fenster**: höchstens 20 gleichzeitig offen, 500 ms Timeout,
   bis zu 3 Versuche — sonst überfordert man das Pult, und im WLAN gehen
   Pakete verloren.
-- **Herzschlag & Überwachung**: `/xremote` alle 2 s, Ping über `/xinfo`
-  (Anzeige in ms), bei Funkstille automatisch "Verbindung verloren" und
-  Neuaufbau samt erneutem Abgleich.
-- **Nachgleich im Hintergrund** (UDP kann Pakete verlieren): sichtbare
-  Fader/Mute alle 5 s, alles alle 60 s.
-- **Eigene Änderungen**: sofort lokal, zum Pult bis zu ~80 Pakete/s pro
-  Parameter (gebündelt), danach ein Kontroll-Lesen; stimmt der Wert am Pult
-  nicht (Paket verloren), wird er einmal automatisch erneut gesendet. Das Pult
-  meldet Änderungen, die per OSC kommen, nicht zurück.
+- **Herzschlag & Überwachung**: `/xremote` und Ping über `/xinfo` alle 1,5 s
+  (Ping-Anzeige in ms, Verlust in %), bei 3 s Funkstille automatisch
+  "Verbindung verloren" und Neuaufbau samt erneutem Abgleich.
+- **Änderungen am Pult kommen sofort** (`/xremote`, ohne Wartezeit an die
+  Oberfläche). Weil UDP im WLAN Pakete verlieren kann, gibt es zwei
+  Sicherheitsnetze:
+  1. **Schnappschüsse per `/formatsubscribe`**: das Pult schickt alle 100 ms
+     alle Mute- und Fader-Werte der sichtbaren Ebene in einem Paket. Weicht ein
+     Wert vom Zwischenspeicher ab, wird der echte Wert sofort einzeln geholt.
+     Nur ein Hinweis, nie direkt angezeigt; wird abgeschaltet, wenn das Format
+     nicht passt.
+  2. **Nachfragen**: Mute alle 0,5 s, Fader alle 1 s (bei gesunden
+     Schnappschüssen seltener, meldet das Pult nichts selbst, doppelt so oft).
+- **Eigene Änderungen**: sofort lokal und sofort zum Pult (danach höchstens ~60
+  Pakete/s je Parameter, immer mit dem neuesten Wert). Während du ziehst, haben
+  Hintergrundanfragen Pause, damit ein langsames Pult keinen Rückstau bekommt.
+  Danach ein Kontroll-Lesen; stimmt der Wert am Pult nicht (Paket verloren),
+  wird er automatisch erneut gesendet.
 - **Meter**: Strom `/meters/0` (32 Kanäle, Aux, FX, Bus, Matrix) und
   `/meters/2` (Main, Gain Reduction von Bus/Matrix/Main); `/meters/1` (Gain
   Reduction der Kanäle) nur, solange die Ansicht eines Kanals offen ist.
@@ -74,7 +83,10 @@ ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
   live in der App
 - "Pult suchen": durchsucht das aktuelle WLAN nach X32/M32-Konsolen und zeigt
   sie zur Auswahl an — keine IP-Adresse nötig
-- Verbindungsstatus mit Ping, automatischer Wiederverbindung und Abgleich
+- Main LR und Mono sind **fest am rechten Rand** auf jeder Ebene sichtbar
+- Verbindungsstatus als Ampel (Ping/Verlust), automatische Wiederverbindung;
+  Klick auf den Status-Balken öffnet die **Diagnose** mit einem **Netzwerk-Test**
+  (misst Laufzeit, Schwankung und Verlust, ändert nichts am Pult)
 - Eigener Auto-Update: prüft beim Start auf GitHub nach einer neueren
   Version, ein Klick auf "Jetzt aktualisieren" lädt, tauscht aus und startet
   neu. Bewusst nicht `electron-updater` (dessen macOS-Updater braucht eine
@@ -118,6 +130,25 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/osc-test.html` — OSC-Codec gegen die Hex-Beispiele der Spezifikation
 - `test/client-test.html` — Verbindungsschicht gegen das simulierte Pult
 - `test/e2e.html?test=1` — Oberfläche + Verbindungsschicht + simuliertes Pult
+- `test/latency-test.html` — Latenz-Messung unter fünf Netz-/Pult-Bedingungen
+
+## Latenz-Messung (simuliert)
+
+`test/latency-test.html` misst gegen das simulierte X32, wie lange eine
+Mute-Änderung am Pult bis zur App braucht und wie stark ein in der App
+gezogener Fader am Pult hinterherhinkt (alle Werte in Millisekunden):
+
+| Bedingung | Mute Pult -> App (p95 / max) | Fader App -> Pult (p95) |
+|---|---|---|
+| Kabel | 4 / 4 | 8 |
+| WLAN gut (1 % Verlust) | 9 / 12 | 12 |
+| WLAN mäßig (5 % Verlust, Ausreißer) | 70 / 244 | 38 |
+| WLAN schlecht (15 % Verlust) | 208 / 623 | 160 |
+| sehr langsames Pult (150 Nachrichten/s) | 8 / 11 | 15 |
+
+Das sind Simulationswerte (Netzlaufzeit ist darin enthalten). Am echten Pult
+bestimmt vor allem das WLAN die Werte; der Netzwerk-Test in der Diagnose zeigt
+sie direkt.
 
 ## Ungetestet an echter Hardware
 

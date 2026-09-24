@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("x32API", {
   set: (path, type, value) => ipcRenderer.send("x32-set", path, type, value),
   want: (paths) => ipcRenderer.send("x32-want", paths),
   setHot: (paths) => ipcRenderer.send("x32-hot", paths),
+  setSubs: (specs) => ipcRenderer.send("x32-subs", specs),
+  networkTest: () => ipcRenderer.invoke("x32-network-test"),
   refresh: (paths, urgent) => ipcRenderer.send("x32-refresh", paths, urgent),
   setMeters: (streams) => ipcRenderer.send("x32-meters", streams),
   // Ereignisse vom Pult

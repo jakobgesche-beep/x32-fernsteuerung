@@ -93,6 +93,11 @@ function connect(ip) {
   });
 }
 
+// Netzwerk-Test: nur lesend (32 Einzelanfragen + 32 auf einmal), ändert nichts am Pult
+ipcMain.handle("x32-network-test", () => new Promise((resolve) => {
+  if (!client || !client.runNetworkTest((result) => resolve(result))) resolve(null);
+}));
+
 const validPath = (p) => typeof p === "string" && p.startsWith("/") && p.length < 120;
 const validPaths = (list) => Array.isArray(list) && list.every(validPath);
 
@@ -105,6 +110,13 @@ ipcMain.on("x32-set", (event, oscPath, type, value) => {
   if (client && validPath(oscPath) && ["f", "i", "s"].includes(type) && okValue) client.set(oscPath, type, value);
 });
 ipcMain.on("x32-want", (event, paths) => { if (client && validPaths(paths)) client.want(paths); });
+const SUB_PATTERN = /^\/(?:(?:ch|auxin|fxrtn|bus|mtx)\/\*\*\/mix\/(?:on|fader)|dca\/\*\/(?:on|fader))$/;
+ipcMain.on("x32-subs", (event, specs) => {
+  if (!client || !Array.isArray(specs) || specs.length > 12) return;
+  const ok = specs.every((s) => s && /^\/x[mf]_[a-z]{2,4}$/.test(s.alias) && SUB_PATTERN.test(s.pattern) && Number.isInteger(s.i0) && Number.isInteger(s.i1)
+    && s.i0 >= 1 && s.i1 <= 32 && s.i0 <= s.i1 && (s.kind === "int" || s.kind === "float") && Number.isInteger(s.tf) && s.tf >= 0 && s.tf <= 99);
+  if (ok) client.setSubs(specs);
+});
 ipcMain.on("x32-hot", (event, paths) => { if (client && validPaths(paths)) client.setHot(paths); });
 ipcMain.on("x32-refresh", (event, paths, urgent) => { if (client && validPaths(paths)) client.refresh(paths, !!urgent); });
 ipcMain.on("x32-meters", (event, streams) => {

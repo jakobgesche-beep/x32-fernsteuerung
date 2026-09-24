@@ -1,7 +1,7 @@
 // Pult-Fader: langer Schlitz, breite Kappe mit Farbstrich, dB-Skala.
 // Der Wert ist die Pult-Position 0..1 (X32-"level"-Wert, 0.75 = 0 dB), verhält sich nach außen
 // wie ein Schieberegler: .value lesen/setzen, "input" beim Ändern, "change" beim Loslassen.
-const FADER_TICKS = [[10, '+10'], [5, '+5'], [0, '0'], [-5, '-5'], [-10, '-10'], [-20, '-20'], [-30, '-30'], [-40, '-40'], [-60, '-60'], [-90, '∞']];
+const FADER_TICKS = [[10, '+10'], [5, '+5'], [0, '0'], [-5, '-5'], [-10, '-10'], [-20, '-20'], [-30, '-30'], [-40, '-40'], [-60, '-60'], [-90, 'oo']];
 const FADER_UNITY = 0.75;
 
 function makeFader(){
