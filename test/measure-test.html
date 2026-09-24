@@ -1,7 +1,8 @@
 <!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
 <link rel="stylesheet" href="../renderer/style.css">
 <style>body{padding:10px;} pre#out{display:none;}</style></head><body>
-<section id="measure" class="measure"></section>
+<button id="rew-btn" class="btn secondary small">REW öffnen</button>
+<section id="measure"></section>
 <pre id="out"></pre>
 <script>try { localStorage.clear(); } catch (e) {}</script>
 <script src="../shared/spl.js"></script>
@@ -35,16 +36,17 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 (async () => {
   try {
+    $('rew-btn').addEventListener('click', () => Measure.openRew());
     Measure.init($('measure'));
     await Measure.show();
-    check('Seite aufgebaut: Eingang, Kanal, Start, Kalibrierung, REW vorhanden', !!($('m-device') && $('m-channel') && $('m-start') && $('m-cal') && $('m-rew-open')));
-    check('REW gefunden: Pfad wird angezeigt, "REW öffnen" sichtbar', /REW\.app/.test($('m-rew-info').textContent) && !$('m-rew-open').hidden && $('m-rew-dl').hidden, $('m-rew-info').textContent);
+    check('Seite aufgebaut: Eingang, Kanal, Start, Zahnrad, Kalibrierung, REW-Programm vorhanden', !!($('m-device') && $('m-channel') && $('m-start') && $('m-gear') && $('m-cal') && $('m-rew-choose')) && $('m-settings').hidden);
+    check('REW gefunden: Pfad wird in den Einstellungen angezeigt, Download-Knopf verborgen', /REW\.app/.test($('m-rew-info').textContent) && $('m-rew-dl').hidden, $('m-rew-info').textContent);
     check('Gerätelisten: mindestens ein Eingang', $('m-device').options.length >= 1 && $('m-device').value !== '', Array.from($('m-device').options).map((o) => o.textContent).join(' | '));
 
     // ---- Messung starten ----
     await Measure.start();
     check('Messung läuft, Aufnahme über AudioWorklet', st().running && st().cap && st().cap.mode === 'worklet', st().cap && st().cap.mode);
-    check('Start-Knopf zeigt "Messung stoppen"', /stoppen/.test($('m-start').textContent));
+    check('Start-Knopf zeigt "Stopp"', /Stopp/.test($('m-start').textContent));
     const gotAudio = await until(() => seconds() >= 3.5, 20000);
     check('Audiodaten kommen an (mindestens 3,5 s in Echtzeit)', gotAudio, seconds().toFixed(2) + ' s, ' + st().fs + ' Hz');
     check('Abtastrate plausibel', [44100, 48000, 88200, 96000].includes(st().fs), String(st().fs));
@@ -53,7 +55,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     check('Kalibrier-Hinweis: "nicht kalibriert"', /nicht/.test($('m-cal-badge').textContent));
     const v0 = num('m-value');
     check('Pegel Kanal 1 = -23,0 dBFS (Testton -20 dBFS Spitze)', near(v0, -23.01, 0.6), 'angezeigt ' + v0);
-    check('Leq und Spitze werden angezeigt', near(num('m-leq'), -23.01, 0.6) && near(num('m-peak'), -20, 0.6), 'Leq ' + num('m-leq') + ', Spitze ' + num('m-peak'));
+    check('Max und Leq 30 min werden angezeigt', near(num('m-max'), -23.01, 0.6) && isFinite(num('m-leq30')), 'Max ' + num('m-max') + ', Leq30 ' + num('m-leq30'));
     check('Leq 30 min zeigt Wert und Dauer', isFinite(num('m-leq30')) && /s|min/.test($('m-leq30-s').textContent), $('m-leq30').textContent + ' ' + $('m-leq30-s').textContent);
     check('Balken folgt dem Pegel (nicht leer, nicht voll)', parseFloat($('m-bar-fill').style.left) > 30 && parseFloat($('m-bar-fill').style.left) < 100, $('m-bar-fill').style.left);
     check('Kanäle: Auswahl passt zur Anzahl', $('m-channel').options.length >= 1, 'Kanäle ' + st().channels + ', Optionen ' + $('m-channel').options.length);
@@ -78,13 +80,6 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
       await until(() => seconds() >= 3.5, 12000);
     } else out.push('--    (Testgerät liefert nur 1 Kanal: Kanalwahl übersprungen)');
 
-    // ---- Bewertung und Zeitbewertung umschalten ----
-    const clickBtn = (grp, key, val) => { const b = $(grp).querySelector('[data-' + key + '="' + val + '"]'); b.click(); return b; };
-    clickBtn('m-weight', 'w', 'C'); await sleep(300);
-    check('Umschalten auf C: gleicher Pegel bei 1 kHz, Einheit dBFS(C)', near(num('m-value'), -23.01, 0.6) && /\(C\)/.test($('m-unit').textContent), $('m-value').textContent + ' ' + $('m-unit').textContent);
-    clickBtn('m-weight', 'w', 'Z'); clickBtn('m-tc', 't', 'slow'); await sleep(300);
-    check('Z + Slow: Pegel stimmt, Max-Beschriftung "Max Slow"', near(num('m-value'), -23.01, 0.6) && /Slow/.test($('m-max-k').textContent), $('m-value').textContent + ' ' + $('m-max-k').textContent);
-    clickBtn('m-weight', 'w', 'A'); clickBtn('m-tc', 't', 'fast'); await sleep(200);
 
     // ---- Kalibrieren ----
     $('m-ref').value = '94'; $('m-ref').dispatchEvent(new Event('change', { bubbles: true }));
@@ -110,8 +105,6 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     check('Grenzwert 96 dB(A) bei 94 dB (2 dB darunter): Pegel gelb', $('m-value').classList.contains('near'));
     $('m-limit').value = '99'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
     check('Grenzwert 99 dB(A): keine Warnung', !$('m-value').classList.contains('over') && !$('m-value').classList.contains('near'));
-    clickBtn('m-weight', 'w', 'C'); $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true })); await sleep(300);
-    check('Warnung nur bei A-Bewertung (bei C keine)', !$('m-value').classList.contains('over')); clickBtn('m-weight', 'w', 'A');
     $('m-limit-on').checked = false; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
 
     // ---- Pegelverlauf und Protokoll (Kalibrierung ist noch aktiv: 94 dB) ----
@@ -131,7 +124,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
     // ---- Zurücksetzen ----
     $('m-reset').click(); await sleep(200);
-    check('Zurücksetzen: Leq beginnt neu (Wert nahe am aktuellen Pegel)', near(num('m-leq'), 94, 1.5), $('m-leq').textContent);
+    check('Zurücksetzen (↺): Maximum beginnt neu (Wert nahe am aktuellen Pegel)', near(num('m-max'), 94, 1.5), $('m-max').textContent);
 
     // ---- Falsche Werte bei Stille? Kalibrierung ohne Signal wird abgelehnt (Prüfung der Grenze) ----
     // (wird in der Rechnungs-Prüfung abgedeckt; hier: Zurücksetzen der Kalibrierung)
@@ -139,11 +132,11 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     check('Kalibrierung zurücksetzen: wieder dBFS', /dBFS/.test($('m-unit').textContent) && /nicht/.test($('m-cal-badge').textContent));
 
     // ---- REW-Knopf hält die Messung an ----
-    $('m-rew-open').click(); await sleep(300);
-    check('REW öffnen: Aufruf erfolgt, Messung angehalten', window.__calls.includes('rewOpen') && !st().running && /starten/.test($('m-start').textContent), JSON.stringify(window.__calls));
+    document.getElementById('rew-btn').click(); await sleep(300);
+    check('REW öffnen (Knopf oben): Aufruf erfolgt, Live-Pegel angehalten', window.__calls.includes('rewOpen') && !st().running && /Start/.test($('m-start').textContent) && !/Stopp/.test($('m-start').textContent), JSON.stringify(window.__calls));
     const tracksEnded = !st().cap;
     check('Mikrofon nach dem Stoppen freigegeben', tracksEnded);
-    $('m-rew-choose').click(); $('m-rew-dl').hidden = false; $('m-rew-dl').click(); await sleep(100);
+    $('m-gear').click(); $('m-rew-choose').click(); $('m-rew-dl').hidden = false; $('m-rew-dl').click(); await sleep(100);
     check('REW wählen / herunterladen rufen den Hauptprozess', window.__calls.includes('rewChoose') && window.__calls.includes('rewDownload'), JSON.stringify(window.__calls));
 
     // ---- Ersatzweg ohne AudioWorklet ----

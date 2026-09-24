@@ -284,7 +284,7 @@ window.__mockInit = (mock) => {
     frame(0.1); frame(0.1);
     check('Meter: Lampe bleibt an, Spitzenwert-Marke bleibt kurz oben', c1.clipEl.classList.contains('on') && parseFloat(c1.peakEls[0].style.top) < 5, c1.peakEls[0].style.top);
     c1.clipEl.click();
-    check('Meter: Klick auf die Lampe setzt sie zurück', !c1.clipEl.classList.contains('on') && !c1.clipped);
+    check('Meter: Klick auf die Lampe setzt sie zurück', !c1.clipEl.classList.contains('on') && !CLIPPED.has('ch01'));
     check('Meter: Kanalzüge ohne Meter (DCA) haben keine Lampe', !STRIP_BY_ID['dca1'].meter);
 
     // Szenen: speichern, verändern, laden, rückgängig
@@ -329,7 +329,7 @@ window.__mockInit = (mock) => {
     const toolsTab = document.querySelector('.layer-tab[data-layer="tools"]');
     toolsTab.click(); await sleep(200);
     const tv = document.getElementById('tools');
-    check('Werkzeuge: Reiter zeigt fünf Rechner, Pult-Fläche ausgeblendet', !tv.hidden && document.getElementById('console').hidden && tv.querySelectorAll('.t-card').length === 5 && toolsTab.classList.contains('on'));
+    check('Werkzeuge: Reiter zeigt vier Rechner, Pult-Fläche ausgeblendet', !tv.hidden && document.getElementById('console').hidden && tv.querySelectorAll('.t-card').length === 4 && toolsTab.classList.contains('on'));
     const results = () => Array.from(tv.querySelectorAll('.t-result b')).map((b) => b.textContent);
     check('Werkzeuge: 20 m bei 20 °C = 58,3 ms Delay, 58,3 ms = 20 m', /^58,3 ms/.test(results()[0]) && /^20 m|^20,0 m/.test(results()[1]), results().slice(0, 2).join(' | '));
     const first = tv.querySelector('.t-card input'); first.value = '34.32'; first.dispatchEvent(new Event('input', { bubbles: true }));
@@ -339,15 +339,46 @@ window.__mockInit = (mock) => {
     document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
     check('Werkzeuge: zurück zum Pult blendet sie aus', tv.hidden && !document.getElementById('console').hidden);
 
-    // Messung: eigener Reiter neben den Ebenen, funktioniert ohne Pult-Bedienung
-    const mTab = document.querySelector('.layer-tab.measure-tab');
-    check('Reiter "Messung" neben den Pult-Ebenen', !!mTab && mTab.textContent === 'Messung');
-    mTab.click(); await sleep(300);
-    check('Messung: Pult-Fläche ausgeblendet, Messung sichtbar, Reiter markiert', document.getElementById('console').hidden && !document.getElementById('measure').hidden && mTab.classList.contains('on') && !document.querySelector('.layer-tab[data-layer="ch"]').classList.contains('on'));
-    check('Messung: Zugriff verweigert -> Hinweis mit Systemeinstellungen-Knopf', /ausgeschaltet/.test(document.getElementById('m-notice').textContent) && /Systemeinstellungen/.test(document.getElementById('m-notice').textContent), document.getElementById('m-notice').textContent.slice(0, 60));
-    check('Messung: REW nicht gefunden -> Hinweis und Download-Knopf', /nicht gefunden/.test(document.getElementById('m-rew-info').textContent) && document.getElementById('m-rew-open').hidden && !document.getElementById('m-rew-dl').hidden, document.getElementById('m-rew-info').textContent.slice(0, 50));
-    document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(300);
-    check('zurück zum Pult: Messung ausgeblendet, Ebene "Bus" aktiv, Fader sichtbar', !document.getElementById('console').hidden && document.getElementById('measure').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
+    // Übersicht über den Fadern
+    const ovEl = document.getElementById('overview');
+    check('Übersicht: sichtbar in der Pult-Ansicht mit Live-Pegel, Main LR und "Auf einen Blick"', !ovEl.hidden && !!document.getElementById('m-start') && !!ovEl.querySelector('.ov-main') && !!ovEl.querySelector('.ov-glance'));
+    check('Übersicht: kein Messung-Reiter mehr, dB-Rechner entfernt', !document.querySelector('.layer-tab[data-layer="measure"]') && !/dB umrechnen/.test(document.getElementById('tools').textContent));
+    setLayer('ch'); await sleep(150);
+    const fs2 = new Float32Array(70); fs2[22] = 0.5; fs2[23] = 0.25;
+    __ctl.emitMeter('2', fs2); Overview.tick();
+    check('Main-Pegel: L -6,0 / R -12,0 dBFS, Balken folgt', ovEl.querySelectorAll('.ov-mrow b')[0].textContent === '-6.0' && ovEl.querySelectorAll('.ov-mrow b')[1].textContent === '-12.0' && parseFloat(ovEl.querySelector('.ov-mbar').style.getPropertyValue('--lvl')) > 50, ovEl.querySelectorAll('.ov-mrow b')[0].textContent + ' / ' + ovEl.querySelectorAll('.ov-mrow b')[1].textContent);
+    await sleep(700);
+    check('Auf einen Blick: Kanäle mit Signal "x / 32", stumme Kanäle mit Namen', /^\d+ \/ 32$/.test(document.getElementById('ov-signal').textContent) && parseInt(document.getElementById('ov-muted').textContent, 10) >= 1 && /Rack Tom/.test(document.getElementById('ov-mutedlist').textContent), document.getElementById('ov-signal').textContent + ' | ' + document.getElementById('ov-mutedlist').textContent);
+    const m2 = STRIP_BY_ID['ch02'].meter, ff = new Float32Array(70); ff[m2.idx[0]] = 1.0; __ctl.emitMeter(m2.stream, ff); await sleep(50);
+    const n2 = X.get('/ch/02/config/name');
+    check('Übersteuert: Kanal erscheint als Chip in der Übersicht', document.getElementById('ov-clips').textContent.includes(n2), document.getElementById('ov-clips').textContent);
+    setLayer('bus'); await sleep(200);
+    check('Übersteuert: bleibt beim Ebenenwechsel gemerkt (Chip da)', document.getElementById('ov-clips').textContent.includes(n2) && CLIPPED.has('ch02'));
+    setLayer('ch'); await sleep(200);
+    check('Übersteuert: Lampe am Kanalzug leuchtet nach der Rückkehr noch', stripUI['ch02'].clipEl.classList.contains('on'));
+    document.querySelector('#ov-clips .ov-chip.clip').click(); await sleep(50);
+    check('Übersteuert: Klick auf den Chip setzt Kanal zurück (Lampe aus, Chip weg)', !stripUI['ch02'].clipEl.classList.contains('on') && !CLIPPED.has('ch02') && /keine/.test(document.getElementById('ov-clips').textContent));
+    const mainF = new Float32Array(70); mainF[22] = 1.0; __ctl.emitMeter('2', mainF); await sleep(50);
+    check('Main LR: Übersteuerung schaltet die Lampe in der Übersicht und im Dock', ovEl.querySelector('.ov-clip').classList.contains('on') && dockUI['st'].clipEl.classList.contains('on'));
+    ovEl.querySelector('.ov-clip').click(); await sleep(30);
+    check('Main LR: Klick setzt beide Lampen zurück', !ovEl.querySelector('.ov-clip').classList.contains('on') && !dockUI['st'].clipEl.classList.contains('on'));
+    ovEl.querySelector('.ov-toggle').click(); await sleep(50);
+    check('Übersicht: einklappen blendet den Inhalt aus, ausklappen bringt ihn zurück', ovEl.classList.contains('collapsed') && getComputedStyle(ovEl.querySelector('.ov-grid')).display === 'none');
+    ovEl.querySelector('.ov-toggle').click(); await sleep(50);
+    check('Übersicht: wieder ausgeklappt', !ovEl.classList.contains('collapsed') && getComputedStyle(ovEl.querySelector('.ov-grid')).display !== 'none');
+    document.getElementById('m-start').click(); await sleep(300);
+    check('Live-Pegel: Start ohne Mikrofon-Freigabe -> Hinweis mit Systemeinstellungen-Knopf', /ausgeschaltet/.test(document.getElementById('m-notice').textContent) && /Systemeinstellungen/.test(document.getElementById('m-notice').textContent), document.getElementById('m-notice').textContent.slice(0, 50));
+    document.getElementById('m-gear').click(); await sleep(50);
+    check('Live-Pegel: Zahnrad öffnet Kalibrierung, Grenzwert und REW-Programm', !document.getElementById('m-settings').hidden && !!document.getElementById('m-cal') && !!document.getElementById('m-limit') && /nicht gefunden/.test(document.getElementById('m-rew-info').textContent));
+    document.getElementById('m-gear').click();
+    document.getElementById('rew-btn').click(); await sleep(300);
+    check('REW-Knopf in der Kopfzeile: nicht gefunden -> Auswahl-Fenster mit Programm wählen / herunterladen', !!document.getElementById('rew-missing') && /Programm wählen/.test(document.getElementById('rew-missing').textContent) && /herunterladen/.test(document.getElementById('rew-missing').textContent));
+    document.querySelector('#rew-missing [data-a="x"]').click(); await sleep(50);
+    check('REW-Auswahl-Fenster lässt sich schließen', !document.getElementById('rew-missing'));
+    document.querySelector('.layer-tab[data-layer="tools"]').click(); await sleep(150);
+    check('Werkzeuge: Übersicht ausgeblendet', ovEl.hidden);
+    document.querySelector('.layer-tab[data-layer="bus"]').click(); await sleep(150);
+    check('zurück zum Pult: Übersicht und Fader wieder da', !ovEl.hidden && !document.getElementById('console').hidden && document.querySelector('.layer-tab[data-layer="bus"]').classList.contains('on') && !!document.querySelector('.strip'));
     out.push(fails ? ('==> ' + fails + ' FEHLER') : '==> alle Tests bestanden');
     const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n');
     return;

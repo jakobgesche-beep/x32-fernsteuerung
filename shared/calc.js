@@ -27,9 +27,6 @@
   const levelAtDistance = (levelAtRef, refMeters, meters) => levelAtRef - 20 * Math.log10(meters / refMeters);
   // Pegel mehrerer Quellen addieren (energetisch): zwei gleich laute = +3 dB
   const sumLevels = (levels) => 10 * Math.log10(levels.reduce((a, l) => a + Math.pow(10, l / 10), 0));
-  const dbToVoltageRatio = (db) => Math.pow(10, db / 20);
-  const dbToPowerRatio = (db) => Math.pow(10, db / 10);
-  const ratioToDb = (ratio, kind) => (kind === "power" ? 10 : 20) * Math.log10(ratio);
 
   // Wellenlänge (m) und Periodendauer (ms) einer Frequenz
   const wavelength = (hz, tempC) => speedOfSound(tempC) / hz;
@@ -45,5 +42,5 @@
     return { name, midi, cents: (midiExact - midi) * 100, exactHz: a4 * Math.pow(2, (midi - 69) / 12) };
   }
 
-  return { speedOfSound, distanceToMs, msToDistance, bpmTimes, levelAtDistance, sumLevels, dbToVoltageRatio, dbToPowerRatio, ratioToDb, wavelength, periodMs, noteOf };
+  return { speedOfSound, distanceToMs, msToDistance, bpmTimes, levelAtDistance, sumLevels, wavelength, periodMs, noteOf };
 });

@@ -81,21 +81,12 @@ const Tools = (function () {
     return c.root;
   }
 
-  function dbCard() {
-    const c = card('dB umrechnen');
-    const db = field('Pegeländerung', 6, 'dB');
-    const res = result();
-    c.body.append(row(db), res);
-    bind([db], () => { const v = db.get(); res.innerHTML = '<b>×' + num(C.dbToVoltageRatio(v), 2) + ' Spannung</b><small>×' + num(C.dbToPowerRatio(v), 2) + ' Leistung · +6 dB ist doppelte Spannung, +3 dB doppelte Leistung, +10 dB fühlt sich etwa doppelt so laut an</small>'; });
-    return c.root;
-  }
-
   function init(root) {
     if (built) return;
     built = true;
     root.innerHTML = '';
     const grid = el('<div class="t-grid"></div>');
-    [delayCard, bpmCard, levelCard, freqCard, dbCard].forEach((make) => grid.appendChild(make()));
+    [delayCard, bpmCard, levelCard, freqCard].forEach((make) => grid.appendChild(make()));
     root.appendChild(grid);
   }
   return { init };

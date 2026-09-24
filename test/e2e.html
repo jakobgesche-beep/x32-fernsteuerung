@@ -1,12 +1,12 @@
 <!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
 <link rel="stylesheet" href="../renderer/style.css"></head><body>
 <header class="topbar"><div class="brand"><span class="brand-mark"></span><span class="brand-text">X32 <b>Fernsteuerung</b></span><span id="version-label" class="version-label"></span></div>
-<div class="conn-row"><button id="scan-btn" class="btn secondary small">Pult suchen</button><input id="ip-input" type="text" placeholder="192.168.0.64" /><button id="connect-btn" class="btn small">Verbinden</button>
+<div class="conn-row"><button id="rew-btn" class="btn secondary small">REW öffnen</button><button id="scan-btn" class="btn secondary small">Pult suchen</button><input id="ip-input" type="text" placeholder="192.168.0.64" /><button id="connect-btn" class="btn small">Verbinden</button>
 <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div></div></header>
 <nav id="layer-tabs" class="layer-tabs"></nav>
+<section id="overview" class="overview"></section>
 <div id="console" class="console offline"><main id="app" class="app"></main><aside id="dock" class="dock"></aside>
 <div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p>Mac und X32 müssen im selben Netzwerk sein.</p><button id="hint-scan-btn" class="btn">Pult suchen</button><label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label></div></div>
-<section id="measure" class="measure" hidden></section>
 <section id="tools" class="tools" hidden></section>
 <pre id="out" style="display:none"></pre>
 <script src="../shared/osc.js"></script>
@@ -53,6 +53,7 @@ window.x32API = {
 <script src="../shared/calc.js"></script>
 <script src="../renderer/measure.js"></script>
 <script src="../renderer/tools.js"></script>
+<script src="../renderer/overview.js"></script>
 <script src="../renderer/changelog.js"></script>
 <script src="../renderer/app.js"></script>
 <script src="../renderer/scenes.js"></script>

@@ -223,12 +223,13 @@ const dockUI = {};
 let unsubscribers = [];
 
 function buildStrip(strip){
-  const ui = { strip, iconId: null, tracks: [], fills: [], peaks: [], peakEls: [], clipped: false };
+  const ui = { strip, iconId: null, tracks: [], fills: [], peakEls: [] };
   const wrap = el('<div class="strip"></div>');
   wrap.appendChild(el('<div class="strip-num">' + esc(strip.label) + '</div>'));
   if(strip.meter){                                   // Übersteuerungs-Lampe: leuchtet, bis man sie anklickt
     const clip = el('<button class="clip-led" title="Übersteuerung – Klick zum Zurücksetzen" aria-label="Übersteuerung zurücksetzen"></button>');
-    clip.addEventListener('click', (e) => { e.stopPropagation(); ui.clipped = false; clip.classList.remove('on'); });
+    clip.addEventListener('click', (e) => { e.stopPropagation(); CLIPPED.delete(strip.id); clipChanged(); });
+    clip.classList.toggle('on', CLIPPED.has(strip.id));
     wrap.appendChild(clip);
     ui.clipEl = clip;
   }
@@ -251,7 +252,6 @@ function buildStrip(strip){
     row.appendChild(track);
     ui.fills.push(fill);
     ui.peakEls.push(peak);
-    ui.peaks.push({ v: 0, t: 0 });
   }
   const fader = makeFader();
   row.appendChild(fader);
@@ -309,10 +309,10 @@ function paintStrip(ui){
 let currentView = 'console';
 function showView(view){
   currentView = view;
-  ['console', 'measure', 'tools'].forEach((id) => { document.getElementById(id).hidden = id !== view; });
+  document.getElementById('console').hidden = view !== 'console';
+  document.getElementById('tools').hidden = view !== 'tools';
+  if(view === 'console'){ Overview.show(); Measure.show(); } else { Overview.hide(); Measure.hide(); }
   layerTabs.querySelectorAll('.layer-tab').forEach((b) => b.classList.toggle('on', b.dataset.layer === (view === 'console' ? currentLayer : view)));
-  if(view === 'measure'){ if(typeof closeDetail === 'function') closeDetail(); Measure.init(document.getElementById('measure')); Measure.show(); }
-  else Measure.hide();
   if(view === 'tools'){ if(typeof closeDetail === 'function') closeDetail(); Tools.init(document.getElementById('tools')); }
 }
 
@@ -368,29 +368,41 @@ function buildLayerTabs(){
   const tl = el('<button class="layer-tab" data-layer="tools">Werkzeuge</button>');
   tl.addEventListener('click', () => showView('tools'));
   layerTabs.appendChild(tl);
-  const m = el('<button class="layer-tab measure-tab" data-layer="measure">Messung</button>');
-  m.addEventListener('click', () => showView('measure'));
-  layerTabs.appendChild(m);
 }
 
 // Pegel auf die sichtbaren Streifen verteilen (mit Spitzenwert-Marke und Übersteuerungs-Lampe)
 const PEAK_HOLD_MS = 1200;
 const CLIP_LEVEL = 0.98;      // ca. -0,2 dBFS
+// Zustand je Kanalzug (auch für nicht sichtbare Ebenen): letzte Werte, gehaltene Spitze; Übersteuerung bleibt gemerkt
+const METER_STATE = {};
+const CLIPPED = new Set();
+function clipChanged(){
+  Object.values(stripUI).concat(Object.values(dockUI)).forEach((ui) => { if(ui.clipEl) ui.clipEl.classList.toggle('on', CLIPPED.has(ui.strip.id)); });
+  if(typeof Overview !== 'undefined') Overview.refresh();
+}
 X.onMeter((id, floats) => {
-  for(const ui of Object.values(stripUI).concat(Object.values(dockUI))){
-    const m = ui.strip.meter;
+  const now = performance.now();
+  for(const s of STRIPS){
+    const m = s.meter;
     if(!m || m.stream !== id) continue;
+    const st = METER_STATE[s.id] || (METER_STATE[s.id] = { peaks: m.idx.map(() => ({ v: 0, t: 0 })), last: m.idx.map(() => 0), level: 0 });
+    const ui = stripUI[s.id] || dockUI[s.id];
+    let level = 0;
     m.idx.forEach((idx, i) => {
-      if(!ui.fills[i] || idx >= floats.length) return;
-      const v = floats[idx];
-      ui.fills[i].style.height = (100 - levelToPct(v)).toFixed(0) + '%';
-      const p = ui.peaks[i];
-      if(v >= p.v){ p.v = v; p.t = performance.now(); }
-      else if(performance.now() - p.t > PEAK_HOLD_MS) p.v = Math.max(v, p.v * 0.9);
-      ui.peakEls[i].style.top = (100 - levelToPct(p.v)).toFixed(0) + '%';
-      ui.peakEls[i].style.opacity = p.v > 0.002 ? '1' : '0';
-      if(v >= CLIP_LEVEL && !ui.clipped){ ui.clipped = true; ui.clipEl.classList.add('on'); }
+      if(idx >= floats.length) return;
+      const v = floats[idx], p = st.peaks[i];
+      st.last[i] = v;
+      if(v > level) level = v;
+      if(v >= p.v){ p.v = v; p.t = now; }
+      else if(now - p.t > PEAK_HOLD_MS) p.v = Math.max(v, p.v * 0.9);
+      if(v >= CLIP_LEVEL && !CLIPPED.has(s.id)){ CLIPPED.add(s.id); clipChanged(); }
+      if(ui && ui.fills[i]){
+        ui.fills[i].style.height = (100 - levelToPct(v)).toFixed(0) + '%';
+        ui.peakEls[i].style.top = (100 - levelToPct(p.v)).toFixed(0) + '%';
+        ui.peakEls[i].style.opacity = p.v > 0.002 ? '1' : '0';
+      }
     });
+    st.level = level;
   }
   if(typeof processingMeters === 'function') processingMeters(id, floats);
 });
@@ -418,8 +430,12 @@ window.x32API.onUpdateError((msg) => {
 window.x32API.getVersion().then((v) => { document.getElementById('version-label').textContent = 'v' + v; if(!window.__noAutoConnect) maybeShowChangelog(v); });
 
 // ================= Start =================
+const rewBtn = document.getElementById('rew-btn');
+if(rewBtn) rewBtn.addEventListener('click', () => Measure.openRew());
 buildLayerTabs();
 buildDock();
+Overview.init();
+Measure.show();
 setLayer('ch');
 if(!window.__noAutoConnect) setTimeout(autoConnect, 300);
 X.loadSnapshot().then(() => { STRIPS.forEach((s) => { if(stripUI[s.id]) paintStrip(stripUI[s.id]); }); });

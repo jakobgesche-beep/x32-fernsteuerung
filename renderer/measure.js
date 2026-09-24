@@ -1,5 +1,5 @@
-// Messung: Schallpegel (dB) mit einem Messmikrofon am USB-Audio-Interface, Terzband-Analyse (RTA)
-// und eine Verknüpfung zu REW (Room EQ Wizard). Arbeitet ohne Verbindung zum Pult.
+// Live-Pegel: dB(A) mit einem Messmikrofon am USB-Audio-Interface, Pegelverlauf, Spektrum (Terzbänder), Grenzwert-Warnung.
+// Sitzt als schmales Feld über den Fadern. Die eigentliche Messung übernimmt REW: Knopf "REW öffnen" in der Kopfzeile.
 // Die Rechnung steckt in shared/spl.js; hier: Eingang wählen, Aufnahme, Anzeige, Kalibrierung.
 const Measure = (function () {
   'use strict';
@@ -19,6 +19,7 @@ const Measure = (function () {
 
   const cfg = Object.assign({ deviceId: '', deviceLabel: '', channel: 0, weighting: 'A', tc: 'fast', limitOn: false, limit: 99, ref: 94 }, load(SETTINGS_KEY, {}));
   const cals = load(CAL_KEY, {});
+  cfg.weighting = 'A'; cfg.tc = 'fast';          // bewusst fest: dB(A), Fast (die Feinmessung macht REW)
   const persistCfg = () => save(SETTINGS_KEY, cfg);
 
   // ---------- Aufnahme (Mikrofon -> Web Audio -> Rohdaten) ----------
@@ -120,72 +121,53 @@ registerProcessor('x32-tap', X32Tap);`;
   const unit = () => (offset() === null ? 'dBFS(' + cfg.weighting + ')' : 'dB(' + cfg.weighting + ')');
 
   // ---------- Aufbau ----------
+  const GEAR = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
   const TEMPLATE = `
-  <div class="m-wrap">
-    <div class="m-col">
-      <section class="m-card m-top">
-        <label class="m-field"><span>Eingang (Interface / Mikrofon)</span><select id="m-device"></select></label>
-        <label class="m-field m-field-narrow"><span>Kanal</span><select id="m-channel"></select></label>
-        <button id="m-start" class="btn">Messung starten</button>
-      </section>
-      <div id="m-notice" class="m-notice" hidden></div>
-
-      <section class="m-card m-main">
-        <div class="m-head">
-          <div class="m-readout"><span id="m-value" class="m-value">–</span><span id="m-unit" class="m-unit">dB(A)</span></div>
-          <div class="m-controls">
-            <div class="seg" id="m-weight" role="group" aria-label="Bewertung"><button data-w="A">A</button><button data-w="C">C</button><button data-w="Z">Z</button></div>
-            <div class="seg" id="m-tc" role="group" aria-label="Zeitbewertung"><button data-t="fast">Fast</button><button data-t="slow">Slow</button></div>
-          </div>
-        </div>
+  <div class="lp">
+    <div class="lp-head">
+      <div class="lp-title">Live-Pegel</div>
+      <button id="m-start" class="btn small">Start</button>
+      <select id="m-device" class="lp-sel" aria-label="Eingang"></select>
+      <select id="m-channel" class="lp-sel lp-sel-narrow" aria-label="Kanal"></select>
+      <span id="m-cal-badge" class="m-badge warn">nicht kalibriert</span>
+      <button id="m-gear" class="lp-gear" title="Kalibrierung, Grenzwert, REW-Programm" aria-label="Einstellungen">${GEAR}</button>
+    </div>
+    <div id="m-notice" class="m-notice" hidden></div>
+    <div class="lp-body">
+      <div class="lp-left">
+        <div class="m-readout"><span id="m-value" class="m-value">–</span><span id="m-unit" class="m-unit">dB(A)</span></div>
         <div class="m-bar"><div class="m-bar-fill" id="m-bar-fill"></div><div class="m-bar-max" id="m-bar-max"></div><div class="m-bar-limit" id="m-bar-limit" hidden></div></div>
         <div class="m-bar-scale" id="m-bar-scale"></div>
-        <div class="m-stats">
-          <div class="m-stat"><span class="k">Leq</span><span class="v" id="m-leq">–</span><span class="s" id="m-leq-s">seit Start</span></div>
-          <div class="m-stat" id="m-leq30-card"><span class="k">Leq 30 min</span><span class="v" id="m-leq30">–</span><span class="s" id="m-leq30-s">gleitend</span></div>
-          <div class="m-stat"><span class="k" id="m-max-k">Max Fast</span><span class="v" id="m-max">–</span><span class="s">höchster Wert</span></div>
-          <div class="m-stat"><span class="k">Spitze</span><span class="v" id="m-peak">–</span><span class="s">Peak</span></div>
-          <button id="m-reset" class="btn secondary small m-reset">Zurücksetzen</button>
+        <div class="lp-stats">
+          <span class="lp-stat" id="m-leq30-card">Leq 30 min <b id="m-leq30">–</b> <i id="m-leq30-s">gleitend</i></span>
+          <span class="lp-stat">Max <b id="m-max">–</b></span>
+          <button id="m-reset" class="lp-reset" title="Maximum zurücksetzen" aria-label="Maximum zurücksetzen">↺</button>
         </div>
-      </section>
-
-      <section class="m-card m-rta-card">
-        <div class="m-card-title">Spektrum (Terzbänder) <span id="m-rta-read" class="m-rta-read"></span></div>
-        <canvas id="m-rta" class="m-rta"></canvas>
-      </section>
-
-      <section class="m-card m-rta-card">
-        <div class="m-card-title">Pegelverlauf <span class="m-hint">Leq je Sekunde, bis zu 30 Minuten</span><span id="m-hist-read" class="m-rta-read"></span>
-          <button id="m-hist-save" class="btn secondary small">Protokoll speichern (CSV)</button></div>
-        <canvas id="m-hist" class="m-rta m-hist"></canvas>
-      </section>
+      </div>
+      <div class="lp-right">
+        <div class="lp-chart"><div class="lp-chart-title">Pegelverlauf <span id="m-hist-read" class="m-rta-read"></span><button id="m-hist-save" class="lp-link" title="Verlauf als CSV-Datei speichern">CSV</button></div><canvas id="m-hist" class="m-hist"></canvas></div>
+        <div class="lp-chart"><div class="lp-chart-title">Spektrum <span id="m-rta-read" class="m-rta-read"></span></div><canvas id="m-rta" class="m-rta"></canvas></div>
+      </div>
     </div>
-
-    <div class="m-col m-side">
-      <section class="m-card">
-        <div class="m-card-title">Kalibrierung <span id="m-cal-badge" class="m-badge warn">nicht kalibriert</span></div>
-        <p class="m-help">Ohne Kalibrierung zeigt die App nur relative Werte (dBFS). Für echte dB-Werte: Kalibrator (z. B. 94 dB bei 1 kHz) auf das Mikrofon setzen, Referenzpegel eintragen, Kalibrieren drücken. Oder ein Referenz-Messgerät gleichzeitig ablesen und dessen Wert eintragen.</p>
+    <div id="m-settings" class="lp-settings" hidden>
+      <section>
+        <div class="m-card-title">Kalibrierung</div>
+        <p class="m-help">Ohne Kalibrierung zeigt die App nur relative Werte (dBFS). Kalibrator (z. B. 94 dB bei 1 kHz) auf das Mikrofon setzen, Referenzpegel eintragen, Kalibrieren drücken. Oder ein Referenz-Messgerät gleichzeitig ablesen und dessen Wert eintragen.</p>
         <div class="m-row"><label class="m-field m-field-narrow"><span>Referenzpegel (dB)</span><input id="m-ref" type="number" step="0.1" min="30" max="140"></label>
-          <button id="m-cal" class="btn secondary">Kalibrieren (3 s)</button><button id="m-cal-reset" class="btn secondary small">Zurücksetzen</button></div>
+          <button id="m-cal" class="btn secondary small">Kalibrieren (3 s)</button><button id="m-cal-reset" class="btn secondary small">Zurücksetzen</button></div>
         <p class="m-help small" id="m-cal-info"></p>
       </section>
-
-      <section class="m-card">
-        <div class="m-card-title">Grenzwert</div>
+      <section>
+        <div class="m-card-title">Grenzwert-Warnung</div>
         <div class="m-row"><label class="m-check"><input id="m-limit-on" type="checkbox"> Warnung ab</label>
           <input id="m-limit" class="m-num" type="number" step="0.5" min="30" max="140"> <span class="m-unit-s">dB(A)</span></div>
-        <p class="m-help small">Färbt Pegel und Leq gelb/rot, sobald der Wert nahe am Grenzwert liegt. Für Veranstaltungen ist z. B. 99 dB(A) als Mittelwert über 30 Minuten üblich (DIN 15905-5). Nur mit Kalibrierung und A-Bewertung aussagekräftig.</p>
+        <p class="m-help small">Färbt Pegel und Leq gelb/rot, sobald der Wert nahe am Grenzwert liegt. Für Veranstaltungen ist z. B. 99 dB(A) als Mittelwert über 30 Minuten üblich (DIN 15905-5). Nur mit Kalibrierung aussagekräftig.</p>
       </section>
-
-      <section class="m-card">
-        <div class="m-card-title">REW (Room EQ Wizard)</div>
+      <section>
+        <div class="m-card-title">REW</div>
         <p class="m-help" id="m-rew-info">Suche REW…</p>
-        <div class="m-row">
-          <button id="m-rew-open" class="btn">REW öffnen</button>
-          <button id="m-rew-choose" class="btn secondary small">Programm wählen…</button>
-          <button id="m-rew-dl" class="btn secondary small">REW herunterladen</button>
-        </div>
-        <p class="m-help small">REW verwendet sein eigenes Eingabegerät (dort dasselbe Interface wählen). Beim Öffnen von REW wird die Pegelmessung hier angehalten, damit das Interface frei ist.</p>
+        <div class="m-row"><button id="m-rew-choose" class="btn secondary small">Programm wählen…</button><button id="m-rew-dl" class="btn secondary small">REW herunterladen</button></div>
+        <p class="m-help small">Der Knopf „REW öffnen“ oben startet REW. Dort dasselbe Interface als Eingang wählen. Beim Öffnen wird die Live-Pegel-Anzeige angehalten, damit das Interface frei ist.</p>
       </section>
     </div>
   </div>`;
@@ -195,18 +177,19 @@ registerProcessor('x32-tap', X32Tap);`;
     root.innerHTML = TEMPLATE;
     const q = (id) => root.querySelector('#' + id);
     ui = {
-      device: q('m-device'), channel: q('m-channel'), start: q('m-start'), notice: q('m-notice'),
-      value: q('m-value'), unit: q('m-unit'), weight: q('m-weight'), tc: q('m-tc'),
+      device: q('m-device'), channel: q('m-channel'), start: q('m-start'), notice: q('m-notice'), gear: q('m-gear'), settings: q('m-settings'),
+      value: q('m-value'), unit: q('m-unit'),
       barFill: q('m-bar-fill'), barMax: q('m-bar-max'), barLimit: q('m-bar-limit'), barScale: q('m-bar-scale'),
-      leq: q('m-leq'), leq30: q('m-leq30'), leq30s: q('m-leq30-s'), leq30card: q('m-leq30-card'), max: q('m-max'), maxK: q('m-max-k'), peak: q('m-peak'), reset: q('m-reset'),
+      leq30: q('m-leq30'), leq30s: q('m-leq30-s'), leq30card: q('m-leq30-card'), max: q('m-max'), reset: q('m-reset'),
       canvas: q('m-rta'), rtaRead: q('m-rta-read'), hist: q('m-hist'), histRead: q('m-hist-read'), histSave: q('m-hist-save'),
       ref: q('m-ref'), cal: q('m-cal'), calReset: q('m-cal-reset'), calBadge: q('m-cal-badge'), calInfo: q('m-cal-info'),
       limitOn: q('m-limit-on'), limit: q('m-limit'),
-      rewInfo: q('m-rew-info'), rewOpen: q('m-rew-open'), rewChoose: q('m-rew-choose'), rewDl: q('m-rew-dl'),
+      rewInfo: q('m-rew-info'), rewChoose: q('m-rew-choose'), rewDl: q('m-rew-dl'),
     };
     ui.ref.value = cfg.ref; ui.limitOn.checked = !!cfg.limitOn; ui.limit.value = cfg.limit;
 
     ui.start.addEventListener('click', () => (S.running ? stop() : start()));
+    ui.gear.addEventListener('click', () => { ui.settings.hidden = !ui.settings.hidden; ui.gear.classList.toggle('on', !ui.settings.hidden); setTimeout(() => { drawRta(); drawHist(); }, 0); });
     ui.device.addEventListener('change', () => {
       const opt = ui.device.selectedOptions[0];
       cfg.deviceId = ui.device.value; cfg.deviceLabel = opt ? opt.dataset.label || '' : ''; cfg.channel = 0; persistCfg();
@@ -217,8 +200,6 @@ registerProcessor('x32-tap', X32Tap);`;
       if (S.cap) { S.cap.setChannel(cfg.channel); freshMeters(); }
       updateCalUi(); buildScale();
     });
-    ui.weight.addEventListener('click', (e) => { const w = e.target.dataset && e.target.dataset.w; if (w) { cfg.weighting = w; persistCfg(); syncControls(); paintText(true); } });
-    ui.tc.addEventListener('click', (e) => { const t = e.target.dataset && e.target.dataset.t; if (t) { cfg.tc = t; persistCfg(); syncControls(); paintText(true); } });
     ui.reset.addEventListener('click', () => { if (S.meter) S.meter.resetHold(); if (S.hold) S.hold.fill(-Infinity); paintText(true); });
     ui.ref.addEventListener('change', () => { cfg.ref = clamp(parseFloat(ui.ref.value) || 94, 30, 140); ui.ref.value = cfg.ref; persistCfg(); });
     ui.cal.addEventListener('click', calibrate);
@@ -226,20 +207,13 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.limitOn.addEventListener('change', () => { cfg.limitOn = ui.limitOn.checked; persistCfg(); paintText(true); });
     ui.limit.addEventListener('change', () => { cfg.limit = clamp(parseFloat(ui.limit.value) || 99, 30, 140); ui.limit.value = cfg.limit; persistCfg(); paintText(true); });
     ui.histSave.addEventListener('click', saveProtocol);
-    ui.rewOpen.addEventListener('click', openRew);
     ui.rewChoose.addEventListener('click', chooseRew);
     ui.rewDl.addEventListener('click', () => api.rewDownload());
     ui.canvas.addEventListener('mousemove', (e) => { const r = ui.canvas.getBoundingClientRect(); S.hover = Math.floor((e.clientX - r.left - RTA.left) / ((r.width - RTA.left - RTA.right) / SPL.THIRD_OCTAVE_CENTERS.length)); drawRta(); });
     ui.canvas.addEventListener('mouseleave', () => { S.hover = -1; drawRta(); });
     if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => { drawRta(); drawHist(); }); ro.observe(ui.canvas); ro.observe(ui.hist); }
     if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', () => { if (S.visible && S.perm === 'granted') refreshDevices(); });
-    syncControls(); updateCalUi(); buildScale(); paintText(true); drawRta();
-  }
-
-  function syncControls() {
-    ui.weight.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.w === cfg.weighting));
-    ui.tc.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === cfg.tc));
-    ui.maxK.textContent = 'Max ' + (cfg.tc === 'fast' ? 'Fast' : 'Slow');
+    updateCalUi(); buildScale(); paintText(true); drawRta();
   }
 
   // ---------- Hinweis-Leiste ----------
@@ -330,7 +304,7 @@ registerProcessor('x32-tap', X32Tap);`;
       cap.setChannel(cfg.channel);
       S.running = true;
       await refreshDevices();                       // jetzt sind die Gerätenamen bekannt
-      ui.start.textContent = 'Messung stoppen'; ui.start.classList.add('running');
+      ui.start.textContent = 'Stopp'; ui.start.classList.add('running');
       notice('');
       updateCalUi(); buildScale(); startLoop();
     } finally { S.starting = false; ui.start.disabled = false; }
@@ -348,7 +322,7 @@ registerProcessor('x32-tap', X32Tap);`;
     if (S.cap) { S.cap.close(); S.cap = null; }
     S.running = false; S.calibrating = null;
     if (!ui) return;
-    ui.start.textContent = 'Messung starten'; ui.start.classList.remove('running');
+    ui.start.textContent = 'Start'; ui.start.classList.remove('running');
     ui.cal.disabled = false; ui.cal.textContent = 'Kalibrieren (' + CAL_SECONDS + ' s)';
     if (!silent) { paintText(true); drawRta(); }
   }
@@ -423,12 +397,10 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.value.textContent = w ? fmt(val) : '–';
     ui.unit.textContent = unit();
     ui.value.className = 'm-value ' + limitState(level(val));
-    ui.leq.textContent = w ? fmt(w.leq) : '–';
     ui.leq30.textContent = w ? fmt(w.leq30) : '–';
     ui.leq30s.textContent = w && w.leq30Seconds > 0 ? 'über ' + (w.leq30Seconds >= 90 ? Math.round(w.leq30Seconds / 60) + ' min' : Math.round(w.leq30Seconds) + ' s') : 'gleitend';
-    ui.leq30card.className = 'm-stat ' + limitState(w ? level(w.leq30) : null);
+    ui.leq30card.className = 'lp-stat ' + limitState(w ? level(w.leq30) : null);
     ui.max.textContent = w ? fmt(cfg.tc === 'fast' ? w.maxFast : w.maxSlow) : '–';
-    ui.peak.textContent = w ? fmt(w.peak) : '–';
     paintBar();
     const cnt = S.meter ? S.meter.chains[0].count : 0;
     if (force || cnt !== histCount) { histCount = cnt; drawHist(); }
@@ -589,20 +561,43 @@ registerProcessor('x32-tap', X32Tap);`;
   // ---------- REW ----------
   async function refreshRew() {
     S.rew = await api.rewStatus();
+    if (!ui) return S.rew;
     ui.rewInfo.textContent = S.rew.found ? 'Gefunden: ' + S.rew.path : 'REW wurde auf diesem Mac nicht gefunden. Wenn es an einem anderen Ort liegt: „Programm wählen…“.';
-    ui.rewOpen.hidden = !S.rew.found; ui.rewDl.hidden = S.rew.found;
+    ui.rewDl.hidden = S.rew.found;
+    return S.rew;
   }
+  // "REW öffnen" (Knopf in der Kopfzeile): hält die Live-Anzeige an, startet REW; fehlt es, Auswahl anbieten
   async function openRew() {
-    if (S.running) { stop(); say('Pegelmessung angehalten, das Interface ist frei für REW.'); }
+    if (S.running) { stop(); say('Live-Pegel angehalten, das Interface ist frei für REW.'); }
     const r = await api.rewOpen();
     if (r.ok) say('REW wird geöffnet…');
-    else if (r.notFound) { say('REW wurde nicht gefunden.', true); refreshRew(); }
+    else if (r.notFound) { refreshRew(); rewMissingDialog(); }
     else say('REW konnte nicht gestartet werden: ' + (r.error || 'unbekannter Fehler'), true);
+    return r;
+  }
+  function rewMissingDialog() {
+    if (document.getElementById('rew-missing')) return;
+    const overlay = document.createElement('div'); overlay.className = 'overlay'; overlay.id = 'rew-missing';
+    const box = document.createElement('div'); box.className = 'detail-card'; box.style.maxWidth = '420px';
+    box.innerHTML = '<div class="detail-header"><div class="section-title" style="margin:0;">REW nicht gefunden</div></div>' +
+      '<p class="m-help">REW ist in „Programme“ nicht zu finden. Liegt es an einem anderen Ort, kannst du das Programm einmal auswählen, die App merkt es sich. Sonst hier herunterladen.</p>' +
+      '<div class="m-row"><button class="btn" data-a="choose">Programm wählen…</button><button class="btn secondary" data-a="dl">REW herunterladen</button><button class="btn secondary" data-a="x">Abbrechen</button></div>';
+    box.addEventListener('click', async (e) => {
+      const a = e.target.dataset && e.target.dataset.a;
+      if (!a) return;
+      overlay.remove();
+      if (a === 'choose') { const ok = await chooseRew(); if (ok) openRew(); }
+      else if (a === 'dl') api.rewDownload();
+    });
+    overlay.appendChild(box);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   }
   async function chooseRew() {
     const r = await api.rewChoose();
-    if (r.ok) { say('REW-Programm gespeichert.'); refreshRew(); }
-    else if (!r.canceled) say(r.error || 'Auswahl fehlgeschlagen.', true);
+    if (r.ok) { say('REW-Programm gespeichert.'); refreshRew(); return true; }
+    if (!r.canceled) say(r.error || 'Auswahl fehlgeschlagen.', true);
+    return false;
   }
 
   // ---------- Öffentliche Schnittstelle ----------
@@ -614,17 +609,13 @@ registerProcessor('x32-tap', X32Tap);`;
       refreshRew();
       S.perm = await api.micStatus();
       if (S.perm === 'granted') await refreshDevices();
-      else if (!S.running) {
-        ui.device.innerHTML = '<option value="">Erst Zugriff erlauben</option>';
-        if (S.perm === 'not-determined') notice('Für die Messung braucht die App Zugriff auf das Mikrofon bzw. das Audio-Interface.', [{ label: 'Zugriff erlauben', fn: start }], 'warn');
-        else notice('Der Zugriff auf das Mikrofon ist ausgeschaltet. In den Systemeinstellungen unter Datenschutz & Sicherheit → Mikrofon „X32 Fernsteuerung“ einschalten.', [{ label: 'Systemeinstellungen öffnen', fn: () => api.openMicSettings() }], 'bad');
-      }
-      drawRta(); startLoop();
+      else if (!S.running) ui.device.innerHTML = '<option value="">Start drücken, dann Eingang wählen</option>';
+      drawRta(); drawHist(); startLoop();
     },
     hide() { S.visible = false; if (S.running) stop(); },
-    start, stop,
+    start, stop, openRew,
     forceScriptProcessor: false,
-    buildCsv, drawHist,
+    buildCsv, drawHist, redraw() { drawRta(); drawHist(); },
     debug: () => ({ S, cfg, cals, offset: offset(), ui }),
   };
 })();

@@ -15,7 +15,6 @@ check('120 BPM: 1/4 = 500 ms (2 Hz), 1/8 = 250 ms, 1/16 = 125 ms, 1/1 = 2000 ms'
 check('120 BPM: punktierte Achtel = 375 ms, Viertel-Triole = 333,3 ms', near(find('1/8 punktiert').ms, 375, 1e-9) && near(find('1/4 Triole').ms, 1000 / 3, 1e-9));
 check('Pegel: 100 dB in 1 m -> 94 dB in 2 m, 80 dB in 10 m', near(C.levelAtDistance(100, 1, 2), 93.98, 0.01) && near(C.levelAtDistance(100, 1, 10), 80, 1e-9));
 check('Pegel addieren: 90 + 90 = 93 dB, 90 + 80 = 90,4 dB, drei gleiche = +4,8 dB', near(C.sumLevels([90, 90]), 93.01, 0.01) && near(C.sumLevels([90, 80]), 90.41, 0.01) && near(C.sumLevels([90, 90, 90]), 94.77, 0.01));
-check('dB <-> Verhältnis: +6 dB = 2x Spannung, +3 dB = 2x Leistung, Faktor 10 = 20 dB / 10 dB', near(C.dbToVoltageRatio(6.0206), 2, 1e-3) && near(C.dbToPowerRatio(3.0103), 2, 1e-3) && near(C.ratioToDb(10), 20, 1e-9) && near(C.ratioToDb(10, 'power'), 10, 1e-9));
 check('Wellenlänge: 1 kHz bei 20 °C = 34,3 cm, 100 Hz = 3,43 m; Periode 100 Hz = 10 ms', near(C.wavelength(1000, 20), 0.3432, 0.001) && near(C.wavelength(100, 20), 3.432, 0.01) && near(C.periodMs(100), 10, 1e-9));
 const a = C.noteOf(440), c4 = C.noteOf(261.63), off = C.noteOf(450);
 check('Ton: 440 Hz = A4, 261,63 Hz = C4, 450 Hz = A4 +39 Cent', a.name === 'A4' && near(a.cents, 0, 1e-6) && c4.name === 'C4' && Math.abs(c4.cents) < 1 && off.name === 'A4' && near(off.cents, 38.9, 0.3), a.name + ' ' + c4.name + ' ' + off.name + ' ' + off.cents.toFixed(1));
