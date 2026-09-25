@@ -4,7 +4,7 @@
 // (3) robust gegen verlorene UDP-Pakete (WLAN).
 //
 //  - lokaler Zwischenspeicher aller Werte (Pfad -> Pult-Wert)
-//  - Handshake über /xinfo, Herzschlag /xremote alle 1,5 s, Verbindungsüberwachung, Auto-Reconnect
+//  - Handshake über /info und /xinfo, Herzschlag /xremote alle 1,5 s, Verbindungsüberwachung, Auto-Reconnect
 //  - Änderungen vom Pult kommen per /xremote und gehen SOFORT (ohne Wartezeit) an die Oberfläche
 //  - periodische Schnappschüsse per /formatsubscribe (alle 100 ms alle Mute-/Fader-Werte der sichtbaren
 //    Ebene in einem Paket): fällt ein Unterschied zum Zwischenspeicher auf, wird der echte Wert sofort
@@ -100,7 +100,7 @@
       this.timerHandle = null;
       this.lastHandshake = 0; this.lastHeartbeat = 0; this.lastMeterRenew = 0; this.lastPoll = 0;
       this.lastAll = 0; this.lastBatch = 0; this.lastStatus = 0; this.lastFailedRetry = 0;
-      this.syncTotal = 0;
+      this.syncTotal = 0; this.handshakes = 0;
       this.pushHits = []; this.pollHits = []; this.pushBroken = false;
       this.netTest = null;
       this.ipcLat = []; this.paceLat = [];
@@ -149,7 +149,7 @@
       const progress = this.syncTotal > 0 ? Math.max(0, Math.min(1, 1 - open / this.syncTotal)) : 1;
       this.onStatus({
         state: this.state, info: this.info, rtt: this.rtt, rttStats: this.rttStats(), loss: this.pingLossPct(),
-        open, progress, stats: this.stats, known: this.known.size, cached: this.values.size,
+        open, progress, stats: this.stats, handshakes: this.handshakes, known: this.known.size, cached: this.values.size,
         dead: Array.from(this.dead).slice(0, 40), pushBroken: this.pushBroken, appLatency: this.appLatencyStats(),
         hints: { active: this.subs.size > 0 && !this.hint.disabled, disabled: this.hint.disabled, found: this.stats.hintFound, ok: this.hint.ok, bad: this.hint.bad },
       });
@@ -178,6 +178,7 @@
         return;
       }
       if (address === "/xinfo") { this.onXinfo(args, t); return; }
+      if (address === "/info") { this.onInfo(args, t); return; }         // Antwort auf die Verbindungsprobe: V2.05, osc-server, Modell, Firmware
       const spec = this.subs.get(address);
       if (spec) { const blob = args.find((a) => a.type === "b"); if (blob) this.onSubBlob(spec, blob.value, t); return; }
       if (!args.length || args[0].type === "b") return;
@@ -185,6 +186,10 @@
       this.applyIncoming(address, args[0].value, this.inflight.has(address), t);
     }
 
+    onInfo(args, t) {
+      const v = (i) => (args[i] ? { type: "s", value: args[i].value } : undefined);
+      this.onXinfo([{ type: "s", value: this.info ? this.info.ip : undefined }, v(1), v(2), v(3)], t);      // gleiche Behandlung wie /xinfo (die IP kennt nur /xinfo)
+    }
     onXinfo(args, t) {
       if (this.pingSentAt) {
         const d = t - this.pingSentAt;
@@ -452,8 +457,10 @@
         if (t - this.lastHandshake >= HANDSHAKE_EVERY) {
           this.lastHandshake = t;
           this.pingSentAt = t;
+          this.transmit("/info");             // klassische Verbindungsprobe (so macht es auch die Referenz-Software von Maillot)
           this.transmit("/xinfo");
           this.transmit("/xremote");
+          this.handshakes++;
         }
         return;
       }

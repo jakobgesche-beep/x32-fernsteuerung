@@ -2,15 +2,11 @@ const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, session, systemPre
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
-const dgram = require("dgram");
 const { execFile, spawn } = require("child_process");
 const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
-const OSC = require("./shared/osc");
-const X32Client = require("./shared/client");
+const X32Connection = require("./shared/connection");
 const REW = require("./shared/rew");
-
-const X32_PORT = 10023;
 
 // Live-Betrieb: macOS ("App Nap") und Chromium drosseln Programme mit verdecktem/minimiertem Fenster,
 // dann laufen Timer viel langsamer und Mute/Fader kämen verzögert an. Das schalten wir ab.
@@ -24,117 +20,69 @@ function keepAwake(on) {
 }
 
 let mainWindow = null;
-let socket = null;
-let client = null;
 
 function toRenderer(channel, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
 }
 function log(msg) { toRenderer("x32-log", msg); }
 
-// ---------- Netzwerk-Suche (aktuelles WLAN durchsuchen statt IP eintippen) ----------
-function localSubnetCandidates() {
-  const ifaces = os.networkInterfaces();
-  for (const name in ifaces) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === "IPv4" && !iface.internal) {
-        const base = iface.address.split(".").slice(0, 3).join(".");
-        const candidates = [];
-        for (let h = 1; h <= 254; h++) candidates.push(base + "." + h);
-        return { localIp: iface.address, candidates };
-      }
-    }
-  }
-  return null;
-}
-
-ipcMain.handle("x32-scan", async () => {
-  return new Promise((resolve) => {
-    const info = localSubnetCandidates();
-    if (!info) { resolve([]); return; }
-    const found = new Map();
-    const scanSocket = dgram.createSocket("udp4");
-    scanSocket.on("message", (msg, rinfo) => {
-      try {
-        const { address, args } = OSC.decodeMessage(msg);
-        if (address === "/xinfo" && args.length >= 3) {
-          found.set(rinfo.address, { ip: rinfo.address, name: args[1].value, model: args[2].value, version: args[3] ? args[3].value : "" });
-        }
-      } catch (e) {}
-    });
-    scanSocket.on("error", () => {});
-    scanSocket.bind(() => {
-      const buf = OSC.encodeMessage("/xinfo", []);
-      info.candidates.forEach((ip) => { try { scanSocket.send(buf, 0, buf.length, X32_PORT, ip); } catch (e) {} });
-      setTimeout(() => { scanSocket.close(); resolve(Array.from(found.values())); }, 1800);
-    });
-  });
-});
-
 // ---------- Verbindung zum Pult ----------
-function disconnect() {
-  keepAwake(false);
-  if (client) { client.stop(); client = null; }
-  if (socket) { try { socket.close(); } catch (e) {} socket = null; }
-}
+// Alles rund um UDP, Suche, Fehlersuche und Protokolldatei steckt in shared/connection.js (testbar ohne Electron).
+const conn = new X32Connection({
+  logFile: path.join(app.getPath("userData"), "verbindung.log"),
+  tmpDir: os.tmpdir(),
+  handlers: {
+    status: (s) => toRenderer("x32-status", s),
+    batch: (entries) => toRenderer("x32-batch", entries),
+    meter: (id, floats) => toRenderer("x32-meter", id, floats),
+    log: (line) => toRenderer("x32-log", line),
+  },
+});
+const clientOf = () => conn.client;
 
-function connect(ip) {
-  return new Promise((resolve) => {
-    disconnect();
-    keepAwake(true);
-    const sock = dgram.createSocket("udp4");
-    socket = sock;
-    let ready = false;
-    sock.on("error", (err) => {
-      log("Netzwerkfehler: " + err.message);
-      if (!ready) resolve({ ok: false, error: err.message });
-    });
-    sock.on("message", (msg) => {
-      if (client) client.receive(new Uint8Array(msg.buffer, msg.byteOffset, msg.byteLength));
-    });
-    sock.bind(() => {
-      ready = true;
-      client = new X32Client({
-        send: (u8) => { try { sock.send(u8, X32_PORT, ip); } catch (e) {} },
-        onBatch: (entries) => toRenderer("x32-batch", entries),
-        onMeter: (id, floats) => toRenderer("x32-meter", id, floats),
-        onStatus: (status) => toRenderer("x32-status", status),
-        onLog: log,
-      });
-      client.start();
-      resolve({ ok: true });
-    });
-  });
-}
+ipcMain.handle("x32-scan", async () => { keepAwakeBrief(); return conn.scan(); });
+ipcMain.handle("x32-connect", async (event, ip) => { keepAwake(true); const r = await conn.connect(String(ip == null ? "" : ip)); if (!r.ok) keepAwake(false); return r; });
+ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }; });
+function disconnect() { keepAwake(false); conn.disconnect(); }
+function keepAwakeBrief() { /* die Suche dauert nur ein paar Sekunden: kein Schlaf-Sperre nötig */ }
+ipcMain.handle("x32-diagnose", async (event, ip, opts) => conn.diagnose(String(ip == null ? "" : ip), { terminal: opts && opts.terminal ? { replied: !!opts.terminal.replied } : null }));
+ipcMain.handle("x32-terminal-test", async (event, ip) => conn.terminalTest(String(ip == null ? "" : ip)));
+ipcMain.handle("x32-net-access", async (event, force) => { const a = conn.netAccess; if (!force && a && Date.now() - a.at < 3000) return a; return conn.checkLocalNetwork(); });
+ipcMain.handle("x32-get-log", async () => conn.logText());
+ipcMain.handle("x32-open-log", async () => { const f = path.join(app.getPath("userData"), "verbindung.log"); if (fs.existsSync(f)) shell.showItemInFolder(f); else shell.openPath(app.getPath("userData")); return true; });
+// Systemeinstellungen: Datenschutz & Sicherheit → Lokales Netzwerk
+ipcMain.handle("x32-open-privacy", async () => { try { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"); } catch (e) { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security"); } return true; });
 
 // Netzwerk-Test: nur lesend (32 Einzelanfragen + 32 auf einmal), ändert nichts am Pult
 ipcMain.handle("x32-network-test", () => new Promise((resolve) => {
+  const client = clientOf();
   if (!client || !client.runNetworkTest((result) => resolve(result))) resolve(null);
 }));
 
 const validPath = (p) => typeof p === "string" && p.startsWith("/") && p.length < 120;
 const validPaths = (list) => Array.isArray(list) && list.every(validPath);
 
-ipcMain.handle("x32-connect", (event, ip) => connect(String(ip)));
-ipcMain.handle("x32-disconnect", async () => { disconnect(); return { ok: true }; });
-ipcMain.handle("x32-snapshot", async () => (client ? client.snapshot() : []));
+ipcMain.handle("x32-snapshot", async () => (clientOf() ? clientOf().snapshot() : []));
 // Häufige, schnelle Aufrufe ohne Antwort (ipcRenderer.send), damit die Übertragung so kurz wie möglich bleibt
 ipcMain.on("x32-set", (event, oscPath, type, value, sentAt) => {
+  const client = clientOf();
   if (client && typeof sentAt === "number") client.noteAppLatency(Date.now() - sentAt);
   const okValue = type === "s" ? typeof value === "string" && value.length <= 24 : typeof value === "number" && Number.isFinite(value);
   if (client && validPath(oscPath) && ["f", "i", "s"].includes(type) && okValue) client.set(oscPath, type, value);
 });
-ipcMain.on("x32-want", (event, paths) => { if (client && validPaths(paths)) client.want(paths); });
+ipcMain.on("x32-want", (event, paths) => { const client = clientOf(); if (client && validPaths(paths)) client.want(paths); });
 const SUB_PATTERN = /^\/(?:(?:ch|auxin|fxrtn|bus|mtx)\/\*\*\/mix\/(?:on|fader)|dca\/\*\/(?:on|fader))$/;
 ipcMain.on("x32-subs", (event, specs) => {
+  const client = clientOf();
   if (!client || !Array.isArray(specs) || specs.length > 12) return;
   const ok = specs.every((s) => s && /^\/x[mf]_[a-z]{2,4}$/.test(s.alias) && SUB_PATTERN.test(s.pattern) && Number.isInteger(s.i0) && Number.isInteger(s.i1)
     && s.i0 >= 1 && s.i1 <= 32 && s.i0 <= s.i1 && (s.kind === "int" || s.kind === "float") && Number.isInteger(s.tf) && s.tf >= 0 && s.tf <= 99);
   if (ok) client.setSubs(specs);
 });
-ipcMain.on("x32-hot", (event, paths) => { if (client && validPaths(paths)) client.setHot(paths); });
-ipcMain.on("x32-refresh", (event, paths, urgent) => { if (client && validPaths(paths)) client.refresh(paths, !!urgent); });
+ipcMain.on("x32-hot", (event, paths) => { const client = clientOf(); if (client && validPaths(paths)) client.setHot(paths); });
+ipcMain.on("x32-refresh", (event, paths, urgent) => { const client = clientOf(); if (client && validPaths(paths)) client.refresh(paths, !!urgent); });
 ipcMain.on("x32-meters", (event, streams) => {
+  const client = clientOf();
   if (client && Array.isArray(streams) && streams.every((x) => /^[0-9]+(:[0-9]+)?$/.test(String(x)))) client.setMeters(streams.map(String));
 });
 
@@ -365,6 +313,8 @@ app.whenReady().then(() => {
   setupMediaPermissions();
   createWindow();
   checkForUpdate();
+  conn.log("=== App gestartet: X32 Fernsteuerung " + app.getVersion() + ", macOS " + os.release() + " (Darwin), Electron " + process.versions.electron + " ===");
+  conn.wakeLocalNetwork().then((a) => toRenderer("x32-net-access", a)).catch(() => {});       // macOS soll die Freigabe für das lokale Netzwerk jetzt abfragen, nicht erst beim Verbinden
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

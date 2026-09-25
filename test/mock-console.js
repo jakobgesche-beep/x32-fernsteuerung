@@ -105,6 +105,7 @@
       this.log.received++;
       const m = OSC.decodeMessage(u8);
       const a = m.address;
+      if (a === "/info") { this.log.info = (this.log.info || 0) + 1; this.reply("/info", ["V2.05", "osc-server", "X32C", "4.06"].map((v) => ({ type: "s", value: v }))); return; }
       if (a === "/xinfo") { this.log.xinfo++; this.reply("/xinfo", ["192.168.1.62", "X32-MOCK", "X32C", "4.06"].map((v) => ({ type: "s", value: v }))); return; }
       if (a === "/xremote") { this.log.xremote++; this.xremoteUntil = Date.now() + 10000; return; }
       if (a === "/formatsubscribe") {                // ,ssiii alias pattern i0 i1 tf

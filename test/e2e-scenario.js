@@ -36,6 +36,117 @@ window.__mockInit = (mock) => {
 
 (async () => {
   if(params.get('view') === 'offline'){ return; }
+  if(params.get('view') === 'ipmig'){
+    const v = document.getElementById('ip-input').value;
+    check('Gespeicherte Adresse (' + params.get('seedip') + (params.get('seedok') ? ', hat schon funktioniert' : '') + ') -> Feld zeigt "' + v + '"', v === (params.get('want') || ''), 'Feld: "' + v + '"');
+    check('Platzhalter im Feld ist keine erfundene Adresse mehr (kein 192.168.0.64), sondern ein Hinweis', !/192\.168\.0\.64/.test(document.getElementById('ip-input').placeholder) && /IP des Pults/.test(document.getElementById('ip-input').placeholder));
+    const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n') + '\n' + (fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+    return;
+  }
+  if(params.get('view') === 'connhelp'){
+    const $ = (s) => document.querySelector(s), $$ = (s) => Array.from(document.querySelectorAll(s));
+    const C = window.__calls, ipIn = $('#ip-input'), toastText = () => $$('.toast').map((t) => t.textContent).join(' | ');
+    const clearToasts = () => $$('.toast').forEach((t) => t.remove());
+    const verdicts = {
+      subnet: { checks: [{ id: 'net', level: 'ok', title: 'Netzwerk des Macs', detail: '192.168.178.81 (Netz 192.168.178.0/24, en0)' }, { id: 'subnet', level: 'fail', title: 'Gleiches Netz wie der Mac', detail: 'nein' }],
+        verdict: { id: 'subnet', level: 'fail', title: 'Pult und Mac sind in verschiedenen Netzen', text: 'Der Mac hängt im Netz 192.168.178.0/24. Die Pult-Adresse 10.0.0.5 liegt nicht in diesem Netz.', steps: ['Mac und Pult an denselben Router.', 'Am Pult SETUP → NETWORK ansehen.'], actions: [{ id: 'scan', label: 'Pult im Netz suchen' }, { id: 'retry', label: 'Nochmal prüfen' }] }, info: { command: 'sudo defaults write x', gateway: '192.168.178.1', ifaces: [] } },
+      maybe: { checks: [], verdict: { id: 'maybe-blocked', level: 'warn', title: 'Das Gerät ist erreichbar, aber es kommt nichts zurück', text: 'Wahrscheinlich blockiert macOS.', steps: ['Systemeinstellungen öffnen.'], actions: [{ id: 'open-privacy', label: 'Systemeinstellungen öffnen' }, { id: 'terminal-test', label: 'Vergleichstest über Terminal' }, { id: 'copy-command', label: 'Notlösung: Befehl kopieren' }] }, info: { command: 'sudo defaults write com.apple.network.local-network AllowedWiFiLocalNetworkAddresses -array "10.0.0.0/24"', gateway: '10.0.0.1', ifaces: [] } },
+      blocked: { checks: [], verdict: { id: 'app-blocked', level: 'fail', title: 'macOS blockiert diese App', text: 'Das Pult antwortet dem Terminal, aber nicht dieser App.', steps: [], actions: [{ id: 'open-privacy', label: 'Systemeinstellungen öffnen' }] }, info: { command: 'sudo x', ifaces: [] } },
+    };
+    const st = (o) => Object.assign({ state: 'connecting', progress: 1, target: '10.0.0.5', waitMs: 0, noReply: false, stats: {} }, o);
+
+    // --- Eingabe ---
+    window.__diagResult = { checks: [], verdict: { id: 'bad-ip', level: 'fail', title: 'Die IP-Adresse stimmt nicht', text: 'Es ist noch keine IP-Adresse eingetragen.', steps: [], actions: [] }, info: {} };
+    ipIn.value = ''; $('#connect-btn').click(); await sleep(150);
+    check('Leeres Feld + "Verbinden": nichts wird geraten (kein connect), stattdessen Hinweis und Suche im Netz; findet die Suche nichts, öffnet die Hilfe', C.connect.length === 0 && C.scan === 1 && /Keine IP-Adresse eingetragen/.test(toastText()) && !!$('#help-overlay') && /noch keine IP-Adresse/.test($('.net-verdict').textContent), 'connect=' + C.connect.length + ' scan=' + C.scan + ' ' + toastText());
+    $('.close-btn').click(); clearToasts(); window.__connectResult = { ok: false, error: 'Die Adresse „abc“ ist keine gültige IP-Adresse.' };
+    ipIn.value = 'abc'; $('#connect-btn').click(); await sleep(80);
+    check('Ungültige Adresse: Meldung des Programms erscheint als Hinweis, Anzeige bleibt "nicht verbunden"', /keine gültige IP/.test(toastText()) && document.getElementById('status-text').textContent === 'nicht verbunden' && C.connect[C.connect.length - 1] === 'abc', toastText());
+    window.__connectResult = null;
+
+    // --- Warnung: macOS blockiert das lokale Netzwerk ---
+    check('Ohne Sperre ist die Warnung im Startbildschirm versteckt', $('#net-warning').hidden === true);
+    window.__netAccess = { blocked: true, error: 'EHOSTUNREACH' }; await recheckNetAccess(true);
+    check('Bei Sperre: Warnung mit Klartext und zwei Knöpfen sichtbar', !$('#net-warning').hidden && /macOS blockiert diese App im lokalen Netzwerk/.test($('#net-warning').textContent) && getComputedStyle($('#net-warning')).display !== 'none');
+    $('#nw-open').click(); await sleep(20);
+    check('Knopf „Systemeinstellungen öffnen“ öffnet Datenschutz → Lokales Netzwerk', C.openPrivacy === 1);
+    $('#nw-help').click(); await sleep(150);
+    check('Knopf „Was tun?“ öffnet die Verbindungshilfe', !!$('#help-overlay')); $('.close-btn').click();
+    const n0 = C.netAccess; window.__netAccess = { blocked: false }; window.dispatchEvent(new Event('focus')); await sleep(60);
+    check('Kommt der Nutzer aus den Systemeinstellungen zurück (Fenster bekommt den Fokus), wird neu geprüft und die Warnung verschwindet', C.netAccess === n0 + 1 && $('#net-warning').hidden === true);
+    window.__netAccessCb({ blocked: true }); await sleep(20);
+    check('Meldet das Hauptprogramm beim Start eine Sperre, erscheint die Warnung von selbst', $('#net-warning').hidden === false);
+    window.__netAccessCb({ blocked: false }); await sleep(20);
+    C.openPrivacy = 0;
+
+    // --- Wartebanner und Statuszeile ---
+    updateStatus(st({ waitMs: 1000 })); await sleep(20);
+    check('Verbinden: Banner über dem Pult "Verbinde mit 10.0.0.5 …", Statuszeile gelb', $('#console').classList.contains('waiting') && $('#cp-title').textContent === 'Verbinde mit 10.0.0.5 …' && $('#status-text').textContent === 'Verbinde mit 10.0.0.5 …' && $('#status-badge').classList.contains('warn') && getComputedStyle($('#connect-progress')).display !== 'none');
+    updateStatus(st({ waitMs: 3200 }));
+    check('Nach 3 Sekunden zeigt die Statuszeile die Wartezeit', /Verbinde mit 10\.0\.0\.5 … 3 s/.test($('#status-text').textContent), $('#status-text').textContent);
+    updateStatus(st({ waitMs: 7000, noReply: true, diag: 'subnet' }));
+    check('Nach der Frist: "Keine Antwort vom Pult" in Banner und Statuszeile (rot), Ursache in einem Satz, Knopf "Hilfe" hervorgehoben', $('#cp-title').textContent === 'Keine Antwort vom Pult' && $('#status-text').textContent === 'Keine Antwort vom Pult' && $('#status-badge').classList.contains('bad') && $('#cp-text').textContent === ConnectHelp.SHORT.subnet && !$('#cp-help').classList.contains('secondary') && $('#connect-progress').classList.contains('bad'));
+    updateStatus({ state: 'lost', progress: 1, target: '10.0.0.5', waitMs: 2000, stats: {} });
+    check('Verbindung kurz weg (unter 4 s): kein Banner, nur die Statuszeile', !$('#console').classList.contains('waiting') && /verloren/.test($('#status-text').textContent));
+    updateStatus({ state: 'lost', progress: 1, target: '10.0.0.5', waitMs: 6000, stats: {} });
+    check('Verbindung länger als 4 s weg: Banner "Verbindung verloren – suche wieder …"', $('#console').classList.contains('waiting') && /suche wieder/.test($('#cp-title').textContent));
+    updateStatus({ state: 'online', progress: 1, target: '10.0.0.5', info: { model: 'X32C' }, stats: {}, rtt: 5 });
+    check('Online: Banner verschwindet; die Adresse wird als "hat funktioniert" gemerkt', !$('#console').classList.contains('waiting') && localStorage.getItem('x32-ip-ok') === '10.0.0.5');
+    updateStatus({ state: 'idle', progress: 1 });
+
+    // --- Hilfe-Fenster ---
+    window.__diagResult = verdicts.subnet;
+    updateStatus(st({ waitMs: 7000, noReply: true, diag: 'subnet' })); ipIn.value = '10.0.0.5';
+    const d0 = C.diagnose.length;
+    $('#cp-help').click(); await sleep(120);
+    check('Hilfe öffnet, Adresse aus dem Feld ist eingetragen, die Ursachensuche läuft sofort', !!$('#help-overlay') && $('#help-ip').value === '10.0.0.5' && C.diagnose.length === d0 + 1 && C.diagnose[d0][0] === '10.0.0.5');
+    check('Urteil in Klartext (rot): Titel, Erklärung, nummerierte Schritte', /verschiedenen Netzen/.test($('.net-verdict').textContent) && $('.net-verdict').classList.contains('bad') && $$('.help-steps li').length === 2);
+    check('Knöpfe passend zur Ursache: "Pult im Netz suchen" hervorgehoben, "Nochmal prüfen"', $$('#help-actions button').map((b) => b.textContent).join('|') === 'Pult im Netz suchen|Nochmal prüfen' && !$$('#help-actions button')[0].classList.contains('secondary'));
+    check('Prüfpunkte im Einzelnen sind aufklappbar und benennen jeden Punkt mit Stufe (OK/FEHLT)', $$('.help-det')[0].textContent.includes('OK · Netzwerk des Macs') && $$('.help-det')[0].textContent.includes('FEHLT · Gleiches Netz wie der Mac'));
+    $('#help-ip').value = '192.168.178.60'; $('#help-check').click(); await sleep(80);
+    check('Adresse ändern und "Prüfen": neue Ursachensuche mit der neuen Adresse', C.diagnose.length === d0 + 2 && C.diagnose[d0 + 1][0] === '192.168.178.60');
+    window.__scanResult = { results: [{ ip: '10.0.0.5', model: 'X32C', name: 'A' }, { ip: '10.0.0.6', model: 'X32', name: 'B' }], ifaces: [] };
+    const scanBefore = C.scan; $$('#help-actions button')[0].click(); await sleep(120);
+    check('Knopf "Pult im Netz suchen": Fenster zu, Suche gestartet (Auswahlliste der gefundenen Pulte)', !$('#help-overlay') && C.scan === scanBefore + 1 && $$('.scan-row').length === 2);
+    $$('.overlay').forEach((o) => o.remove()); clearToasts(); C.connect.length = 0;
+    $('#cp-help').click(); await sleep(100); window.__connectResult = { ok: true, ip: '10.0.0.5' }; $$('#help-actions button')[1].click(); await sleep(60);
+    check('Knopf "Nochmal prüfen": Fenster zu, Verbinden mit der Adresse im Fenster', !$('#help-overlay') && C.connect.length === 1 && C.connect[0] === '10.0.0.5', JSON.stringify(C.connect));
+    window.__connectResult = null;
+
+    window.__diagResult = (ip, opts) => (opts && opts.terminal && opts.terminal.replied ? verdicts.blocked : verdicts.maybe);
+    $('#cp-help').click(); await sleep(100);
+    check('Stumme Sperre: gelb, Knöpfe Einstellungen / Vergleichstest / Notlösung', $('.net-verdict').classList.contains('mid') && $$('#help-actions button').map((b) => b.textContent).join('|') === 'Systemeinstellungen öffnen|Vergleichstest über Terminal|Notlösung: Befehl kopieren');
+    $$('#help-actions button')[0].click(); await sleep(30);
+    check('Knopf "Systemeinstellungen öffnen": öffnet Datenschutz → Lokales Netzwerk, Fenster bleibt offen', C.openPrivacy === 1 && !!$('#help-overlay'));
+    $$('#help-actions button')[2].click(); await sleep(60);
+    check('Knopf "Notlösung: Befehl kopieren": Befehl mit Netz und Erklärung (Terminal, Passwort, Neustart) steht im Fenster', /AllowedWiFiLocalNetworkAddresses -array "10\.0\.0\.0\/24"/.test($('#help-extra').textContent) && /Mac neu starten/.test($('#help-extra').textContent));
+    $$('#help-actions button')[1].click(); await sleep(200);
+    check('Vergleichstest über Terminal: Test läuft, danach neue Ursachensuche MIT dem Ergebnis, Urteil "macOS blockiert diese App"', C.terminal.length === 1 && C.diagnose[C.diagnose.length - 1][1].terminal.replied === true && /macOS blockiert diese App/.test($('.net-verdict').textContent) && $('.net-verdict').classList.contains('bad'), JSON.stringify(C.diagnose[C.diagnose.length - 1][1]));
+    const logBox = $('#help-logbox'); logBox.open = true; await sleep(150);
+    check('Protokoll aufklappen: zeigt das Protokoll aus dem Hauptprogramm', /Zeile 1: Verbinden mit 10\.0\.0\.5/.test($('#help-log').textContent));
+    $('#help-open-log').click(); await sleep(20);
+    check('"Im Finder zeigen" öffnet den Protokoll-Ordner', C.openLog === 1);
+    $('.close-btn').click();
+    check('Fenster schließt', !$('#help-overlay'));
+
+    // --- Suche ---
+    updateStatus({ state: 'idle', progress: 1 }); clearToasts(); ipIn.value = '10.0.0.9'; window.__diagResult = verdicts.subnet;
+    window.__scanResult = { results: [], ifaces: [{ name: 'en0', network: '192.168.178.0', prefix: 24 }, { name: 'en7', network: '10.0.0.0', prefix: 24 }] };
+    $('#scan-btn').click(); await sleep(200);
+    check('Suche ohne Ergebnis: Hinweis nennt die durchsuchten Netze, Hilfe-Fenster öffnet von selbst mit der eingetragenen Adresse', /Durchsucht: 192\.168\.178\.0\/24 \(en0\), 10\.0\.0\.0\/24 \(en7\)/.test(toastText()) && !!$('#help-overlay') && $('#help-ip').value === '10.0.0.9', toastText());
+    $('.close-btn').click(); clearToasts();
+    window.__scanResult = { results: [], ifaces: [] }; $('#scan-btn').click(); await sleep(120); $('.close-btn') && $('.close-btn').click();
+    check('Suche ohne Netzwerk: klare Meldung "mit keinem Netzwerk verbunden"', /mit keinem Netzwerk verbunden/.test(toastText()), toastText());
+    clearToasts(); window.__connectResult = { ok: true, ip: '10.0.0.5' }; C.connect.length = 0;
+    window.__scanResult = { results: [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne', version: '4.06' }], ifaces: [] }; $('#scan-btn').click(); await sleep(150);
+    check('Suche findet genau ein Pult: verbindet selbst und sagt es', C.connect[0] === '10.0.0.5' && /Pult gefunden: X32C bei 10\.0\.0\.5/.test(toastText()), JSON.stringify(C.connect) + toastText());
+    window.__scanResult = { results: [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }, { ip: '10.0.0.6', model: 'X32', name: 'FOH' }], ifaces: [] }; $('#scan-btn').click(); await sleep(150);
+    check('Suche findet mehrere Pulte: Auswahlliste mit Adresse, Name und Modell', $$('.scan-row').length === 2 && /10\.0\.0\.6/.test($$('.scan-row')[1].textContent));
+    $$('.overlay').forEach((o) => o.remove());
+
+    const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n') + '\n' + (fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+    return;
+  }
   const wasOffline = document.getElementById('console').classList.contains('offline');
   const autoResults = [];
   if(params.get('test')){
@@ -43,14 +154,14 @@ window.__mockInit = (mock) => {
     const box = document.getElementById('auto-connect') || (() => { const c = document.createElement('input'); c.type = 'checkbox'; c.id = 'auto-connect'; document.body.appendChild(c); return c; })();
     autoResults.push(['aus', box.checked = false, await autoConnect()]);
     box.checked = true;
-    window.x32API.scan = async () => [];
+    window.x32API.scan = async () => ({ results: [], ifaces: [] });
     autoResults.push(['leer', null, await autoConnect()]);
-    window.x32API.scan = async () => [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }, { ip: '10.0.0.6', model: 'X32', name: 'FOH' }];
+    window.x32API.scan = async () => ({ results: [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }, { ip: '10.0.0.6', model: 'X32', name: 'FOH' }], ifaces: [] });
     autoResults.push(['mehrere', null, await autoConnect()]);
     const pickerShown = !!document.querySelector('.scan-row');
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     check('Auto-Verbinden: aus = nichts tun, kein Pult = Hinweis, mehrere = Auswahl', autoResults[0][2] === 'aus' && autoResults[1][2] === 'nichts gefunden' && autoResults[2][2] === 'auswahl' && pickerShown, JSON.stringify(autoResults.map((r) => r[2])));
-    window.x32API.scan = async () => [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }];
+    window.x32API.scan = async () => ({ results: [{ ip: '10.0.0.5', model: 'X32C', name: 'Bühne' }], ifaces: [] });
     autoResults.push(['eins', null, await autoConnect()]);
     check('Auto-Verbinden: genau ein Pult gefunden = verbindet selbst', autoResults[3][2] === 'verbunden' && document.getElementById('ip-input').value === '10.0.0.5', autoResults[3][2]);
   } else {

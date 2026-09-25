@@ -47,11 +47,29 @@ native App (Electron + Node) und keine Website.
 
 ## Verbindung zum X32
 
-Beim X32 Compact hängt meist ein WLAN-Router am Netzwerkport, mit dem sich
-der Mac verbindet. Die Werks-Standard-IP-Adresse des X32 ist **192.168.0.64**
-(als Platzhalter schon im Eingabefeld voreingestellt) — falls euer Router
-ein anderes Subnetz vergibt, steht die tatsächliche IP am X32 unter
-**Setup → Network**.
+Mac und Pult müssen im **selben Netzwerk** sein (zum Beispiel am selben Router: Pult per Kabel, Mac per WLAN oder Kabel).
+Die IP-Adresse des Pults steht am Pult unter **SETUP → Reiter NETWORK** (die Adresse ist meist vom Router vergeben und kann sich ändern).
+Sie kann in das Feld oben eingetragen werden, oder man drückt **Pult suchen**: die App durchsucht dann alle Netze des Macs (WLAN und
+Kabel) und findet das Pult selbst. (192.168.0.64 kommt nur als Beispiel in der Protokoll-Beschreibung vor, es ist keine Werks-Adresse.)
+
+Kommt keine Antwort, zeigt die App nach etwa 6 Sekunden **„Keine Antwort vom Pult“** und die **Verbindungshilfe** sucht die Ursache
+(Netz, Ping, Antwort des Pults, Zugriff der App aufs lokale Netzwerk) und erklärt sie mit Schritten und Knöpfen.
+
+**macOS-Freigabe „Lokales Netzwerk“.** Seit macOS 15 darf eine App nur mit Freigabe auf Geräte im Netz zugreifen (Systemeinstellungen →
+Datenschutz & Sicherheit → **Lokales Netzwerk** → „X32 Fernsteuerung“ einschalten). Die App prüft das beim Start; ist der Zugriff
+verweigert, steht im Startbildschirm eine Warnung mit einem Knopf zu den Systemeinstellungen. Eine Sperre meldet macOS ohne Fehlermeldung
+in der App: einzelne Pakete an Geräte werden still verworfen, nur ein Rundruf (Multicast) scheitert mit `EHOSTUNREACH`. Daran erkennt die
+App die Sperre. Eine Notlösung (`sudo defaults write com.apple.network.local-network AllowedWiFiLocalNetworkAddresses …`, danach Neustart)
+gibt ein ganzes Netz für alle Programme frei; die Hilfe zeigt den fertigen Befehl.
+
+Jede App bekommt beim Bauen eine **eigene UUID** (`scripts/macho-uuid.js`), weil macOS die Freigabe unter der UUID des Hauptprogramms
+speichert und Electron-Apps derselben Version sonst dieselbe UUID haben. Die UUID hängt nur vom App-Namen ab und bleibt bei Updates gleich.
+
+Protokolldatei: `~/Library/Application Support/x32-fernsteuerung/verbindung.log` (auch in der Verbindungshilfe unter „Protokoll“).
+
+Tests der Netzwerk-Schicht laufen mit Node (auch mit der Electron-Datei der App):
+`ELECTRON_RUN_AS_NODE=1 "/Applications/X32 Fernsteuerung.app/Contents/MacOS/X32 Fernsteuerung" test/net-test.js` (Adressen, Ursachen,
+echte UDP-Sockets, Suche), `test/macho-test.js` (UUID) und `test/smoke.js` (Rauchtest im echten Electron mit unsichtbarem Fenster).
 
 ## Funktionen
 

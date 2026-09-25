@@ -79,3 +79,5 @@ body.touch-split .m-rta,body.touch-split .m-hist{height:104px;}
 body.touch-split .ov-side{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;}
 body.touch-split .ov-glance{margin-top:0;padding-top:0;border-top:none;}
 body.touch-split #reserve{display:flex;grid-column:2;grid-row:2;align-items:center;justify-content:center;min-height:0;border:1px dashed var(--line);border-radius:var(--radius-m,8px);color:var(--muted);font-size:13px;opacity:0.7;}
+
+body.touch .cp-actions .btn,body.touch .help-target .btn{min-height:44px;padding:8px 16px;font-size:14px;}

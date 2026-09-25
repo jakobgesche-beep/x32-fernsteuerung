@@ -1,6 +1,6 @@
 {
   "name": "x32-fernsteuerung",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "Native Mac-App: Fernsteuerung für das Behringer X32 (Fader, EQ, Kompressor, Pegel)",
   "main": "main.js",
   "private": true,
@@ -32,7 +32,8 @@
       "identity": null,
       "icon": "build/icon.icns",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Für die Pegelmessung (dB-Meter) mit dem Messmikrofon am Audio-Interface."
+        "NSMicrophoneUsageDescription": "Für die Pegelmessung (dB-Meter) mit dem Messmikrofon am Audio-Interface.",
+        "NSLocalNetworkUsageDescription": "X32 Fernsteuerung verbindet sich über das lokale Netzwerk mit dem X32/M32-Pult (UDP, Port 10023) und sucht Pulte im Netz."
       }
     },
     "afterSign": "scripts/afterSignAdHoc.js",

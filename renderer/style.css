@@ -459,3 +459,17 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .fader-bubble{display:none;position:absolute;left:50%;bottom:calc(var(--t) * (var(--h) - var(--ch)) + var(--ch) + 8px);transform:translateX(-50%);z-index:5;
   padding:5px 10px;border-radius:8px;background:#000c;color:#fff;font:600 15px/1 var(--font-mono);white-space:nowrap;pointer-events:none;border:1px solid rgba(255,255,255,0.25);}
 .fader.fine .fader-bubble::after{content:" · fein";font-weight:500;color:#9CC8FF;}
+
+/* Verbindungshilfe und Wartebanner */
+.connect-progress{display:none;}
+.console.waiting .connect-progress{display:flex;}
+.console.waiting .connect-hint:not(.connect-progress){display:none;}
+.console.waiting .strip-row,.console.waiting .dock{opacity:0.35;filter:saturate(0.4);pointer-events:none;}
+.connect-progress.bad .hint-title{color:var(--danger);}
+.cp-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0;}
+.help-target .row{display:flex;gap:8px;margin-top:4px;} .help-target input{flex:1;min-width:0;}
+.help-steps{margin:0 0 4px;padding-left:20px;color:var(--text-dim);font-size:13px;line-height:1.5;} .help-steps li{margin-bottom:6px;}
+.help-det{margin-top:12px;border-top:1px solid var(--line-soft);padding-top:8px;} .help-det summary{cursor:pointer;color:var(--text-dim);font-size:12.5px;}
+.help-log{background:#101010;border:1px solid #333;border-radius:6px;padding:8px 10px;font-family:var(--font-mono);font-size:11px;line-height:1.45;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;user-select:text;margin:8px 0 0;}
+.help-target input{background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 10px;font-family:var(--font-mono);font-size:13px;outline:none;} .help-target input:focus{border-color:var(--accent);}
+.net-warning{border:1px solid var(--danger-dim);background:rgba(225,96,76,0.10);border-radius:8px;padding:10px 14px;margin:0 0 14px;max-width:440px;font-size:12.5px;line-height:1.45;color:var(--text-dim);display:flex;flex-direction:column;gap:4px;} .net-warning b{color:var(--danger);font-size:13px;} .net-warning[hidden]{display:none;}

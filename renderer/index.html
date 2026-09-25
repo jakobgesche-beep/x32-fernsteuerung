@@ -22,7 +22,7 @@
       <button id="rew-btn" class="btn secondary small" title="Messsoftware REW starten">REW öffnen</button>
       <button id="offline-btn" class="btn secondary small">Offline-Modus</button>
       <button id="scan-btn" class="btn secondary small">Pult suchen</button>
-      <input id="ip-input" type="text" placeholder="192.168.0.64" />
+      <input id="ip-input" type="text" placeholder="IP des Pults, z. B. 192.168.1.50" title="Die IP-Adresse steht am Pult unter SETUP → NETWORK. Oder auf „Pult suchen“ drücken." />
       <button id="connect-btn" class="btn small">Verbinden</button>
       <div id="status-badge" class="badge"><span id="pulse-dot" class="pulse-dot"></span><span id="status-text">nicht verbunden</span></div>
     </div>
@@ -34,9 +34,23 @@
   <div id="console" class="console offline">
     <main id="app" class="app"></main>
     <aside id="dock" class="dock" aria-label="Main"></aside>
+    <div id="connect-progress" class="connect-hint connect-progress">
+      <div class="hint-title" id="cp-title">Verbinde …</div>
+      <p id="cp-text"></p>
+      <div class="cp-actions" style="justify-content:center">
+        <button id="cp-help" class="btn secondary">Hilfe bei der Verbindung</button>
+        <button id="cp-scan" class="btn secondary">Pult suchen</button>
+        <button id="cp-cancel" class="btn secondary">Abbrechen</button>
+      </div>
+    </div>
     <div id="connect-hint" class="connect-hint">
       <div class="hint-title">Nicht mit einem Pult verbunden</div>
-      <p>Mac und X32 müssen im selben Netzwerk sein (z. B. im WLAN des Pult-Routers).</p>
+      <p>Mac und X32 müssen im selben Netzwerk sein (z. B. im WLAN des Pult-Routers). Die IP-Adresse des Pults steht am Pult unter SETUP → NETWORK.</p>
+      <div id="net-warning" class="net-warning" hidden>
+        <b>macOS blockiert diese App im lokalen Netzwerk.</b>
+        <span>Ohne die Freigabe kann sie das Pult nicht erreichen, auch wenn alles andere stimmt.</span>
+        <div class="cp-actions" style="justify-content:center"><button id="nw-open" class="btn small">Systemeinstellungen öffnen</button><button id="nw-help" class="btn small secondary">Was tun?</button></div>
+      </div>
       <button id="hint-scan-btn" class="btn">Pult suchen</button>
       <button id="hint-offline-btn" class="btn secondary">Offline arbeiten</button>
       <label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label>
@@ -59,6 +73,7 @@
   <script src="measure.js"></script>
   <script src="tools.js"></script>
   <script src="overview.js"></script>
+  <script src="connect-help.js"></script>
   <script src="changelog.js"></script>
   <script src="app.js"></script>
   <script src="scenes.js"></script>

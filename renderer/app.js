@@ -44,7 +44,11 @@ function updateStatus(s){
   consoleEl.classList.toggle('offline', st === 'idle');
   consoleEl.classList.toggle('reconnecting', st === 'lost' || st === 'connecting');
   let text = 'nicht verbunden';
-  if(st === 'connecting'){ text = 'Verbinde…'; statusBadge.classList.add('warn'); }
+  if(st === 'connecting'){
+    const secs = Math.floor((s.waitMs || 0) / 1000);
+    text = s.noReply ? 'Keine Antwort vom Pult' : 'Verbinde mit ' + (s.target || '') + ' …' + (secs >= 2 ? ' ' + secs + ' s' : '');
+    statusBadge.classList.add(s.noReply ? 'bad' : 'warn');
+  }
   else if(st === 'lost'){ text = 'Verbindung verloren – suche…'; statusBadge.classList.add('bad'); }
   else if(st === 'offline'){ text = 'Offline-Modus'; statusBadge.classList.add('offline-mode'); }
   else if(st === 'online'){
@@ -60,6 +64,8 @@ function updateStatus(s){
   offlineBtn.title = offlineBtn.disabled ? 'Erst vom Pult trennen' : 'Ohne Pult arbeiten: alle Regler lassen sich ausprobieren und vorbereiten';
   if(typeof Offline !== 'undefined') Offline.update(s);
   if(st === 'idle' || st === 'offline') resetMeterDisplays();      // keine alten Pegel stehen lassen
+  if(st === 'online' && s.target){ try { localStorage.setItem('x32-ip-ok', s.target); } catch(e){} }      // diese Adresse hat wirklich funktioniert
+  if(typeof ConnectHelp !== 'undefined') ConnectHelp.updateBanner(s);
   if(st === 'online' && !wantedOnce){ wantedOnce = true; wantAll(); }
   if(st === 'lost' && lastState !== 'lost') toast('Verbindung zum Pult verloren – die App versucht es automatisch weiter.', true);
   lastState = st;
@@ -121,9 +127,10 @@ function showDiagnostics(){
   if(diagOverlay) return;
   diagOverlay = el('<div class="overlay"></div>');
 const box = el('<div class="detail-card" style="max-width:560px;"><div class="detail-header"><div class="detail-title">Verbindungs-Diagnose</div></div><div class="diag-body diag-grid"></div>' +
-    '<div class="diag-test"><button class="btn small" id="net-test-btn">Netzwerk-Test starten (3 Sekunden)</button><div id="net-test-result" class="net-result"></div></div>' +
+    '<div class="diag-test"><button class="btn small" id="net-test-btn">Netzwerk-Test starten (3 Sekunden)</button> <button class="btn small secondary" id="help-btn">Verbindungshilfe</button><div id="net-test-result" class="net-result"></div></div>' +
     '<p class="hint">Bei Problemen hilft ein Foto dieses Fensters.</p></div>');
   box.querySelector('#net-test-btn').addEventListener('click', runNetTest);
+  box.querySelector('#help-btn').addEventListener('click', () => { ConnectHelp.open(ipInput.value.trim()); });
   const closeBtn = el('<button class="close-btn">&times;</button>');
   const close = () => { diagOverlay.remove(); diagOverlay = null; };
   closeBtn.addEventListener('click', close);
@@ -182,12 +189,14 @@ offlineBtn.addEventListener('click', () => (X.isOffline() ? leaveOffline() : ent
 document.getElementById('hint-offline-btn').addEventListener('click', enterOffline);
 
 async function connectTo(ip){
+  ip = String(ip == null ? '' : ip).trim();
   if(X.isOffline()) leaveOffline();
   ipInput.value = ip;
-  try { localStorage.setItem('x32-ip', ip); } catch(e){}
   wantedOnce = false;
   const res = await window.x32API.connect(ip);
-  if(!res.ok) toast('Verbindung fehlgeschlagen: ' + res.error, true);
+  if(!res.ok){ toast(res.error || 'Verbindung fehlgeschlagen.', true); updateStatus({ state: 'idle', progress: 1 }); return; }
+  ipInput.value = res.ip || ip;
+  try { localStorage.setItem('x32-ip', ipInput.value); } catch(e){}
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -196,9 +205,34 @@ connectBtn.addEventListener('click', async () => {
     updateStatus({ state: 'idle', progress: 1 });
     return;
   }
-  connectTo(ipInput.value.trim() || '192.168.0.64');
+  const typed = ipInput.value.trim();
+  if(!typed){                                                    // nichts eingetragen: nicht raten, sondern das Pult im Netz suchen
+    toast('Keine IP-Adresse eingetragen: ich suche das Pult im Netz …');
+    scanBtn.click();
+    return;
+  }
+  connectTo(typed);
 });
-try { const savedIp = localStorage.getItem('x32-ip'); if(savedIp) ipInput.value = savedIp; } catch(e){}
+try {
+  let savedIp = localStorage.getItem('x32-ip');
+  // Alte Version: als Vorgabe stand hier 192.168.0.64 (nur ein Beispiel aus einer Anleitung, keine echte Pult-Adresse). Nur behalten, wenn sie je funktioniert hat.
+  if(savedIp === '192.168.0.64' && localStorage.getItem('x32-ip-ok') !== savedIp){ localStorage.removeItem('x32-ip'); savedIp = null; }
+  if(savedIp) ipInput.value = savedIp;
+} catch(e){}
+// Darf die App ins lokale Netzwerk? (macOS verlangt eine Freigabe.) Bei Sperre: Hinweis im Startbildschirm; nach Rückkehr in die App wird neu geprüft.
+function showNetAccess(a){
+  const box = document.getElementById('net-warning');
+  if(box) box.hidden = !(a && a.blocked);
+}
+async function recheckNetAccess(force){ try { showNetAccess(await window.x32API.netAccess(!!force)); } catch(e){} }
+if(window.x32API.onNetAccess) window.x32API.onNetAccess(showNetAccess);
+window.addEventListener('focus', () => recheckNetAccess(true));
+document.getElementById('nw-open').addEventListener('click', () => window.x32API.openPrivacy());
+document.getElementById('nw-help').addEventListener('click', () => ConnectHelp.open(ipInput.value.trim()));
+recheckNetAccess(false);
+document.getElementById('cp-help').addEventListener('click', () => ConnectHelp.open(ipInput.value.trim()));
+document.getElementById('cp-scan').addEventListener('click', () => scanBtn.click());
+document.getElementById('cp-cancel').addEventListener('click', () => connectBtn.click());
 
 // ---------- Pult-Suche (aktuelles WLAN durchsuchen) ----------
 function showConsolePicker(results){
@@ -223,8 +257,14 @@ scanBtn.addEventListener('click', async () => {
   scanBtn.disabled = true;
   scanBtn.textContent = 'Suche läuft...';
   try {
-    const results = await window.x32API.scan();
-    if(!results.length) toast('Kein X32/M32 im aktuellen WLAN gefunden. IP manuell eingeben oder erneut versuchen.', true);
+    const scan = await window.x32API.scan();
+    const results = scan.results || [];
+    if(!results.length){
+      const nets = (scan.ifaces || []).map((f) => f.network + '/' + f.prefix + ' (' + f.name + ')').join(', ');
+      toast(!(scan.ifaces || []).length ? 'Der Mac ist mit keinem Netzwerk verbunden (WLAN oder Kabel prüfen).' : 'Kein X32/M32 gefunden. Durchsucht: ' + nets + '. Pult an? Im selben Netz? Für Details auf „Verbindungshilfe“ drücken.', true);
+      ConnectHelp.open(ipInput.value.trim());                       // nichts gefunden: gleich erklären, woran es liegen kann
+    }
+    else if(results.length === 1 && !X.status().state.match(/connecting|online/)) { connectTo(results[0].ip); toast('Pult gefunden: ' + (results[0].model || 'X32') + ' bei ' + results[0].ip + ' – verbinde …'); }
     else showConsolePicker(results);
   } finally {
     scanBtn.disabled = false;
@@ -244,7 +284,7 @@ async function autoConnect(){
   const oldText = hintText ? hintText.textContent : '';
   if(hintText) hintText.textContent = 'Suche das Pult im Netzwerk…';
   let results = [];
-  try { results = await window.x32API.scan(); } catch(e){}
+  try { const scan = await window.x32API.scan(); results = (scan && scan.results) || []; } catch(e){}
   if(hintText) hintText.textContent = oldText;
   if(X.status().state !== 'idle') return 'schon verbunden';   // du warst schneller
   let saved = '';

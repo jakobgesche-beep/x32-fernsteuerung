@@ -5,6 +5,13 @@ const on = (channel, cb) => ipcRenderer.on(channel, (event, ...args) => cb(...ar
 contextBridge.exposeInMainWorld("x32API", {
   // Verbindung
   scan: () => ipcRenderer.invoke("x32-scan"),
+  diagnose: (ip, opts) => ipcRenderer.invoke("x32-diagnose", ip, opts),
+  terminalTest: (ip) => ipcRenderer.invoke("x32-terminal-test", ip),
+  netAccess: (force) => ipcRenderer.invoke("x32-net-access", force),
+  onNetAccess: (cb) => on("x32-net-access", cb),
+  getLog: () => ipcRenderer.invoke("x32-get-log"),
+  openLog: () => ipcRenderer.invoke("x32-open-log"),
+  openPrivacy: () => ipcRenderer.invoke("x32-open-privacy"),
   connect: (ip) => ipcRenderer.invoke("x32-connect", ip),
   disconnect: () => ipcRenderer.invoke("x32-disconnect"),
   snapshot: () => ipcRenderer.invoke("x32-snapshot"),

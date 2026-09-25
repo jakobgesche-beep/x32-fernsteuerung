@@ -1,5 +1,15 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.10.0': {
+    title: 'Neu in Version 2.10.0 – Verbindung zum Pult verbessert',
+    items: [
+      ['Verbindungshilfe', 'Kommt keine Antwort vom Pult, sagt die App nach wenigen Sekunden in einfachen Worten, woran es liegt: falsches Netz, Pult nicht erreichbar, falsche Adresse, oder macOS blockiert die App im lokalen Netzwerk. Mit den passenden Schritten und Knöpfen.'],
+      ['macOS-Freigabe „Lokales Netzwerk“', 'Neuere macOS-Versionen verlangen eine Freigabe, damit eine App Geräte im Netz erreichen darf. Die App prüft das beim Start und zeigt eine Warnung mit Knopf zu den Systemeinstellungen. Jede App hat jetzt eine eigene Kennung (UUID), damit macOS sie nicht mit anderen verwechselt.'],
+      ['Pult suchen findet mehr', 'Die Suche durchsucht jetzt alle Netzwerke des Macs (WLAN und Kabel), mit Einzelanfragen und Rundruf. Sie sagt, welche Netze durchsucht wurden.'],
+      ['Keine erfundene Adresse mehr', 'Die Adresse 192.168.0.64 war nur ein Beispiel aus einer Anleitung. Ist das Feld leer, sucht die App das Pult im Netz, statt zu raten. Ungültige Eingaben werden erklärt.'],
+      ['Protokoll und Wartezeit', 'Beim Verbinden zeigt die App die Zieladresse und die Wartezeit. Alles wird in einer Protokolldatei festgehalten (Verbindungshilfe → Protokoll), die bei der Fehlersuche hilft.'],
+    ],
+  },
   '2.9.0': {
     title: 'Neu in Version 2.9.0',
     items: [
