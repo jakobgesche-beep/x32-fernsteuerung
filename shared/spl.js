@@ -61,9 +61,122 @@
     return 20 * Math.log10(magnitude(designWeighting(type, fs), f, fs));
   }
 
+  // ---------- Mikrofon-Kalibrierdatei (Frequenzgang des Mikrofons) ----------
+  // Eine solche Datei sagt, wie stark das Mikrofon je Frequenz vom idealen Verlauf abweicht (dB; plus = das Mikrofon zeigt zu viel an).
+  // Format wie bei REW/ARTA/miniDSP: Zeilen "Frequenz Hz  dB [Phase]", getrennt durch Leerzeichen, Tab, Semikolon oder Komma;
+  // Kopfzeilen (Text oder mit * " # beginnend) werden ignoriert. Die Messung gleicht die Abweichung aus (zieht sie ab).
+  const MICCAL_MAX_DEV = 40;
+  function parseMicCal(text) {
+    const points = [], seen = new Set();
+    let sens = null, skipped = 0;
+    String(text == null ? "" : text).split(/\r?\n/).forEach((line) => {
+      const t = line.trim();
+      if (!t) return;
+      if (/^[*"#;]/.test(t) || /^[A-Za-z]/.test(t)) { const m = /sens\s*factor\s*=\s*(-?[\d.,]+)/i.exec(t); if (m) sens = parseFloat(m[1].replace(",", ".")); return; }
+      const parts = (/[\s;]/.test(t) ? t.split(/[\s;]+/) : t.split(",")).map((x) => x.replace(",", "."));
+      const f = parseFloat(parts[0]), d = parseFloat(parts[1]);
+      if (!isFinite(f) || !isFinite(d) || parts.length < 2) { skipped++; return; }
+      if (f < 5 || f > 60000 || Math.abs(d) > MICCAL_MAX_DEV) { skipped++; return; }
+      const key = f.toFixed(3);
+      if (seen.has(key)) return;
+      seen.add(key); points.push([f, d]);
+    });
+    points.sort((a, b) => a[0] - b[0]);
+    if (points.length < 3) return { ok: false, error: "In der Datei stehen weniger als 3 brauchbare Zeilen. Erwartet werden Zeilen wie „1000  0,5“ (Frequenz in Hz, Abweichung in dB).", points: [], skipped };
+    if (points[0][0] > 500 || points[points.length - 1][0] < 4000) return { ok: false, error: "Die Datei deckt nicht genug Frequenzen ab (mindestens von 500 Hz bis 4 kHz).", points: [], skipped };
+    return { ok: true, points, sens, skipped };
+  }
+  // Abweichung bei f: linear zwischen den Punkten (Frequenz logarithmisch), außerhalb konstant
+  function micCalDb(points, f) {
+    if (!points || !points.length) return 0;
+    if (f <= points[0][0]) return points[0][1];
+    const last = points[points.length - 1];
+    if (f >= last[0]) return last[1];
+    let i = 1; while (points[i][0] < f) i++;
+    const a = points[i - 1], b = points[i], t = (Math.log(f) - Math.log(a[0])) / (Math.log(b[0]) - Math.log(a[0]));
+    return a[1] + (b[1] - a[1]) * t;
+  }
+  const micCalToText = (points) => points.map((p) => p[0].toFixed(p[0] < 100 ? 2 : 1) + "\t" + p[1].toFixed(2)).join("\n") + "\n";
+  const micCalMax = (points) => points.reduce((m, p) => (Math.abs(p[1]) > Math.abs(m[1]) ? p : m), points[0]);
+
+  // Peaking-Filter (RBJ) für eine Verstärkung gainDb bei f0
+  function peaking(f0, gainDb, Q, fs) {
+    const A = Math.pow(10, gainDb / 40), w0 = 2 * Math.PI * f0 / fs, al = Math.sin(w0) / (2 * Q), c = Math.cos(w0);
+    const a0 = 1 + al / A;
+    return { b0: (1 + al * A) / a0, b1: -2 * c / a0, b2: (1 - al * A) / a0, a1: -2 * c / a0, a2: (1 - al / A) / a0 };
+  }
+  // Filterkette, die die Abweichung des Mikrofons ausgleicht: je Sechstel-Oktave ein breites Peaking-Filter (Q = 2). Die dB-Kurven der
+  // hintereinander geschalteten Filter addieren sich; die Verstärkungen werden per Ausgleichsrechnung (kleinste Fehlerquadrate auf einem dichten
+  // Raster, 4 Punkte je Filterabstand, also auch zwischen den Filtermitten) bestimmt und viermal nachgestellt. Die beste Runde gewinnt, jede
+  // Verstärkung ist auf ±24 dB begrenzt. Ergebnis bei glatten Kurven (Mikrofone): unter 0,35 dB Abweichung von 20 Hz bis 16 kHz;
+  // bei stark welligen Testkurven (±3 dB je Oktave) und Zufallskurven höchstens etwa 0,7 dB. Ganz oben (über etwa 18 kHz) bis 1 dB.
+  // Die Kurve wird bei 1 kHz auf 0 dB gelegt: die Pegel-Kalibrierung (Kalibrator bei 1 kHz) bleibt gültig, wenn eine Datei später geladen oder getauscht wird.
+  const MICCAL_Q = 2, MICCAL_RIDGE = 0.01, MICCAL_CLAMP = 24;
+  function solveLinear(A, b) {                       // Gauß mit Spaltenwahl; A und b werden verändert
+    const n = b.length;
+    for (let c = 0; c < n; c++) {
+      let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+      const t = A[c]; A[c] = A[p]; A[p] = t; const tb = b[c]; b[c] = b[p]; b[p] = tb;
+      for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; if (f) { for (let k = c; k < n; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; } }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) { let sum = b[r]; for (let k = r + 1; k < n; k++) sum -= A[r][k] * x[k]; x[r] = sum / A[r][r]; }
+    return x;
+  }
+  function designMicCorrection(points, fs) {
+    const centers = [], grid = [];
+    for (let k = -38; k <= 40; k++) { const fc = 1000 * Math.pow(10, k / 20); if (fc < fs * 0.48) centers.push(fc); }   // etwas über den Messbereich hinaus, damit die Ränder stimmen
+    for (let i = 0; ; i++) { const f = 20 * Math.pow(10, i / 80); if (f > fs * 0.42) break; grid.push(f); }
+    const n = centers.length, m = grid.length, ref = micCalDb(points, 1000), target = grid.map((f) => -(micCalDb(points, f) - ref));
+    if (target.every((x) => Math.abs(x) < 0.03)) return [];
+    const build = (g) => centers.map((fc, i) => peaking(fc, g[i], MICCAL_Q, fs));
+    // M[i][j]: Wirkung (dB) von Filter j mit 1 dB Verstärkung am Rasterpunkt i; N = MᵀM + Ridge (hält die Verstärkungen klein)
+    const M = grid.map(() => new Array(n).fill(0));
+    for (let j = 0; j < n; j++) { const sec = [peaking(centers[j], 1, MICCAL_Q, fs)]; for (let i = 0; i < m; i++) M[i][j] = 20 * Math.log10(magnitude(sec, grid[i], fs)); }
+    const N = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let a = 0; a < n; a++) for (let b = a; b < n; b++) { let sum = 0; for (let i = 0; i < m; i++) sum += M[i][a] * M[i][b]; N[a][b] = N[b][a] = sum; }
+    for (let a = 0; a < n; a++) N[a][a] += MICCAL_RIDGE;
+    let g = new Array(n).fill(0), best = g, bestErr = Infinity;
+    for (let it = 0; it <= 4; it++) {
+      const sec = build(g), e = grid.map((f, i) => target[i] - 20 * Math.log10(magnitude(sec, f, fs)));
+      const err = Math.sqrt(e.reduce((acc, x) => acc + x * x, 0) / m);
+      if (err < bestErr) { bestErr = err; best = g; }
+      if (it === 4 || !(err > 0.005)) break;
+      const rhs = new Array(n).fill(0);
+      for (let a = 0; a < n; a++) { let sum = -MICCAL_RIDGE * g[a]; for (let i = 0; i < m; i++) sum += M[i][a] * e[i]; rhs[a] = sum; }
+      const d = solveLinear(N.map((r) => r.slice()), rhs);
+      g = g.map((x, i) => Math.max(-MICCAL_CLAMP, Math.min(MICCAL_CLAMP, x + d[i])));
+    }
+    const chain = build(best), trim = 1 / magnitude(chain, 1000, fs);      // bei 1 kHz genau 0 dB (dort wird kalibriert)
+    chain[0].b0 *= trim; chain[0].b1 *= trim; chain[0].b2 *= trim;
+    return chain;
+  }
+  // Ausgleich je Terzband in dB (zum Addieren zum gemessenen Terzbandpegel)
+  const micCalBandDb = (points) => THIRD_OCTAVE_CENTERS.map((fc) => -(micCalDb(points, fc) - micCalDb(points, 1000)));
+
+  // ---------- Prüfung des Kalibriersignals ----------
+  // Spanne (höchster minus niedrigster Wert) einer Pegelreihe in dB; unendlich, wenn nichts Messbares dabei ist
+  function levelRange(levels) {
+    const f = levels.filter(isFinite);
+    return f.length ? Math.max.apply(null, f) - Math.min.apply(null, f) : Infinity;
+  }
+  // Ist das Signal ein ruhiger Einzelton (Kalibrator)? levels: Pegel (dB) während der Messung, bands: Leistung je Terzband (linear).
+  // Ein Ton liegt fast vollständig in einem Terzband (plus Nachbarn, falls er zwischen zwei Bändern sitzt); Musik und Rauschen verteilen sich.
+  // Ergebnis: { ok, code: "ok" | "noise" | "unstable" | "silent", share (0..1), fc (Mittenfrequenz), range (dB) }
+  function checkCalTone(levels, bands) {
+    const range = levelRange(levels);
+    let sum = 0, best = -1, bp = 0;
+    for (let i = 0; i < bands.length; i++) { sum += bands[i]; if (bands[i] > bp) { bp = bands[i]; best = i; } }
+    if (best < 0 || !(sum > 0)) return { ok: false, code: "silent", share: 0, fc: 0, range };
+    const share = (bp + (best > 0 ? bands[best - 1] : 0) + (best + 1 < bands.length ? bands[best + 1] : 0)) / sum, fc = THIRD_OCTAVE_CENTERS[best];
+    if (share < 0.9) return { ok: false, code: "noise", share, fc, range };
+    if (range > 2) return { ok: false, code: "unstable", share, fc, range };
+    return { ok: true, code: "ok", share, fc, range };
+  }
+
   // ---------- Pegelmesser ----------
   class SplMeter {
-    // opts.leqWindowSec: Länge des gleitenden Leq (Standard 1800 s = 30 min)
+    // opts.leqWindowSec: Länge des gleitenden Leq (Standard 1800 s = 30 min); opts.micCal: Kalibrierdatei des Mikrofons ([[Hz, dB], ...])
     constructor(fs, opts) {
       opts = opts || {};
       this.fs = fs;
@@ -72,6 +185,8 @@
       this.aF = 1 - Math.exp(-1 / (fs * TAU_FAST));
       this.aS = 1 - Math.exp(-1 / (fs * TAU_SLOW));
       this.dcR = Math.exp(-2 * Math.PI * 5 / fs);   // Gleichspannung (unter ~5 Hz) ausblenden
+      this.corr = opts.micCal && opts.micCal.length ? designMicCorrection(opts.micCal, fs) : [];       // Mikrofon-Ausgleich: einmal pro Messwert, vor den Bewertungen
+      this.cz = new Float64Array(this.corr.length * 2);
       this.chains = WEIGHTINGS.map((name) => {
         const sec = designWeighting(name, fs);
         return {
@@ -89,11 +204,19 @@
     }
 
     push(chunk) {
-      const aF = this.aF, aS = this.aS, R = this.dcR, bucket = this.bucketSamples, capturing = this.capturing;
+      const aF = this.aF, aS = this.aS, R = this.dcR, bucket = this.bucketSamples, capturing = this.capturing, corrSec = this.corr, cz = this.cz;
       let dcX = this.dcX, dcY = this.dcY;
       for (let i = 0; i < chunk.length; i++) {
         const x = chunk[i];
-        const xd = x - dcX + R * dcY; dcX = x; dcY = xd;
+        let xd = x - dcX + R * dcY; dcX = x; dcY = xd;
+        if (corrSec.length) {
+          for (let s2 = 0, zi = 0; s2 < corrSec.length; s2++, zi += 2) {
+            const q = corrSec[s2], out = q.b0 * xd + cz[zi];
+            cz[zi] = q.b1 * xd - q.a1 * out + cz[zi + 1];
+            cz[zi + 1] = q.b2 * xd - q.a2 * out;
+            xd = out;
+          }
+        }
         for (let c = 0; c < this.chains.length; c++) {
           const ch = this.chains[c];
           let y = xd;
@@ -242,6 +365,8 @@
     }
 
     ready() { return this.filled >= this.N; }
+    // Kalibrierdatei des Mikrofons ([[Hz, dB], ...]) oder null: gleicht die Terzbandpegel aus
+    setMicCal(points) { this.corr = points && points.length ? micCalBandDb(points).map((d) => Math.pow(10, d / 10)) : null; }
 
     // Mittlere Leistung (Effektivwert², linear) je Terzband, oder null solange das Fenster noch nicht gefüllt ist
     bandPowers() {
@@ -255,11 +380,11 @@
         const { idx, wt } = this.bands[b];
         let s = 0;
         for (let j = 0; j < idx.length; j++) { const k = idx[j]; s += wt[j] * (re[k] * re[k] + im[k] * im[k]); }
-        out[b] = s * sc;
+        out[b] = s * sc * (this.corr ? this.corr[b] : 1);
       }
       return out;
     }
   }
 
-  return { SplMeter, Spectrum, designWeighting, weightingDb, magnitude, THIRD_OCTAVE_CENTERS, THIRD_OCTAVE_LABELS, TAU_FAST, TAU_SLOW, db };
+  return { SplMeter, Spectrum, designWeighting, weightingDb, magnitude, parseMicCal, micCalDb, micCalToText, micCalMax, designMicCorrection, micCalBandDb, levelRange, checkCalTone, THIRD_OCTAVE_CENTERS, THIRD_OCTAVE_LABELS, TAU_FAST, TAU_SLOW, db };
 });

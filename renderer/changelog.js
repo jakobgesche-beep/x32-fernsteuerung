@@ -1,5 +1,15 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.11.0': {
+    title: 'Neu in Version 2.11.0 – Live-Pegel ruhiger und genauer',
+    items: [
+      ['Ruhige Zahlen', 'Die große Zahl ändert sich höchstens zweimal pro Sekunde, damit man sie ablesen kann. Balken und Diagramm laufen weiter flüssig. Einstellbar: schnell (0,125 s), langsam (1 s, Standard) oder ruhig (Mittel über 3 s). Mit „Halten“ bleibt die Zahl stehen.'],
+      ['dB(A), dB(C) oder dB(Z)', 'Die Bewertung ist jetzt wählbar. Ohne Kalibrierung steht „dBFS“ (relativ zur Vollaussteuerung, deshalb immer unter 0, z. B. −60): das sind keine echten dB. Ein Hinweis erklärt das, mit Knopf zum Umrechnen.'],
+      ['Kalibrieren mit Prüfung', 'Mit Kalibrator (die App prüft, dass wirklich ein ruhiger Ton anliegt, nicht Musik oder Raumlärm) oder ohne Kalibrator mit einem Referenz-Messgerät (z. B. Handy-App) und Rauschen. Übersteuerte Signale werden abgelehnt. Nach dem Kalibrieren zeigt die App, wie viel Aussteuerung übrig ist und wo das Rauschen des Interfaces liegt.'],
+      ['Mikrofon-Kalibrierdatei', 'Für das ECM8000 gibt es keine offizielle Datei. Jetzt kann man eine Datei laden (REW-, Text- oder CSV-Format), eigene Werte eintippen und speichern. Die Kurve gleicht den Frequenzgang des Mikrofons aus (Spektrum und dB(A)) und wird bei 1 kHz auf 0 dB gelegt, damit die Kalibrierung gültig bleibt.'],
+      ['Übersteuerungs-Warnung', 'Erreicht der Eingang die Vollaussteuerung, zeigt der Live-Pegel „Übersteuert“, denn dann stimmen die Werte nicht mehr.'],
+    ],
+  },
   '2.10.0': {
     title: 'Neu in Version 2.10.0 – Verbindung zum Pult verbessert',
     items: [

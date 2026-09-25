@@ -473,3 +473,16 @@ h1,h2,h3,.headline{font-family:var(--font-head);letter-spacing:-0.01em;}
 .help-log{background:#101010;border:1px solid #333;border-radius:6px;padding:8px 10px;font-family:var(--font-mono);font-size:11px;line-height:1.45;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;user-select:text;margin:8px 0 0;}
 .help-target input{background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 10px;font-family:var(--font-mono);font-size:13px;outline:none;} .help-target input:focus{border-color:var(--accent);}
 .net-warning{border:1px solid var(--danger-dim);background:rgba(225,96,76,0.10);border-radius:8px;padding:10px 14px;margin:0 0 14px;max-width:440px;font-size:12.5px;line-height:1.45;color:var(--text-dim);display:flex;flex-direction:column;gap:4px;} .net-warning b{color:var(--danger);font-size:13px;} .net-warning[hidden]{display:none;}
+
+/* Live-Pegel: Bewertung, Reaktionsgeschwindigkeit, Halten, Hinweis */
+.m-ctl{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin:8px 0 4px;}
+.m-mini{display:flex;flex-direction:column;gap:2px;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);min-width:0;} .m-mini .lp-sel{text-transform:none;letter-spacing:0;max-width:170px;}
+.lp-hold{background:var(--panel-2);border:1px solid var(--line);color:var(--text-dim);border-radius:8px;padding:6px 12px;font-size:11.5px;cursor:pointer;} .lp-hold:hover{color:var(--text);} .lp-hold.on{background:var(--accent-dim);border-color:var(--accent);color:#fff;}
+.m-relhint{font-size:11px;color:var(--muted);line-height:1.45;margin:2px 0 6px;} .m-relhint[hidden]{display:none;}
+
+.m-corr-plot{display:block;width:100%;max-width:420px;height:78px;margin:8px 0 4px;}
+.m-corr-plot[hidden],.lp-settings [hidden]{display:none;}
+.m-corr-text{display:block;width:100%;box-sizing:border-box;margin:8px 0;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px;font-family:var(--font-mono);font-size:11.5px;line-height:1.5;resize:vertical;}
+.m-mini .lp-sel,.m-field .lp-sel{flex:0 0 auto;}
+.m-badge.bad{color:var(--danger);border-color:var(--danger-dim);background:rgba(225,96,76,0.08);} .m-badge[hidden]{display:none;}
+.m-help.small.warn{color:#E8C23D;}

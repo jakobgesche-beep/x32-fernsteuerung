@@ -208,11 +208,29 @@ Jede Funktion steckt in einer eigenen Datei bzw. einem eigenen Commit und lässt
 
 Über den Fadern liegt eine **Übersicht** (mit dem Pfeil oben einklappbar):
 
-- **Live-Pegel** (`renderer/measure.js`): dB(A) (Fast) vom Messmikrofon am USB-Audio-Interface, Balken, Leq 30 min, Maximum,
-  Pegelverlauf (Leq je Sekunde, bis 30 min, CSV-Export) und Terzband-Spektrum. Aufnahme ohne Echo-Filter, Rauschunterdrückung
-  und Auto-Gain; der Ton wird nie ausgegeben. Das ECM8000 braucht 48 V Phantomspeisung am Interface. Zahnrad: Kalibrierung
-  (Kalibrator, z. B. 94 dB bei 1 kHz, oder Referenzgerät; Offset je Gerät und Kanal), Grenzwert-Warnung (z. B. 99 dB(A)) und
-  REW-Programm. Ohne Kalibrierung sind die Werte relativ (dBFS). Die Feinmessung (Frequenzgang, Nachhall usw.) macht REW.
+- **Live-Pegel** (`renderer/measure.js`, Rechnung in `shared/spl.js`): Pegel vom Messmikrofon am USB-Audio-Interface, Balken, Leq 30 min,
+  Maximum, Pegelverlauf (Leq je Sekunde, bis 30 min, CSV-Export) und Terzband-Spektrum. Aufnahme ohne Echo-Filter, Rauschunterdrückung
+  und Auto-Gain; der Ton wird nie ausgegeben. Das ECM8000 braucht 48 V Phantomspeisung am Interface. Die Rechnung folgt dem
+  Schallpegelmesser: Bewertung A, C oder Z, Zeitbewertung Fast (125 ms) und Slow (1 s), Leq.
+  - **Zahlen lesbar (seit 2.11):** die große Zahl ändert sich höchstens 2-mal pro Sekunde (schnell: 4-mal), Balken und Diagramm laufen
+    flüssig. Anzeige „schnell“ (Fast), „langsam“ (Slow, Standard) oder „ruhig“ (zusätzlich über etwa 3 s gemittelt); „Halten“ friert ein.
+  - **dBFS oder dB:** ohne Kalibrierung sind die Werte relativ zur Vollaussteuerung (dBFS, immer unter 0; „−60“ ist also *nicht* 60 dB
+    Lautstärke). Die App weist darauf hin. Erst nach der Kalibrierung stehen echte dB da.
+  - **Kalibrieren (Zahnrad):** (1) *Kalibrator* (z. B. 94 dB bei 1 kHz): gemessen wird unbewertet (Z) über 3 s; die App prüft, dass
+    ein ruhiger Einzelton anliegt (mindestens 90 % der Energie in einem Terzband samt Nachbarn, Pegelschwankung höchstens 2 dB), sonst
+    wird abgelehnt. (2) *Referenz-Messgerät*: gleichmäßiges Rauschen (z. B. Rosa Rauschen), 10 s Mittelwert in der gewählten Bewertung,
+    Wert des anderen Geräts eintragen (Schwankung höchstens 6 dB). Übersteuerte Signale (Spitze ≥ −1 dBFS) werden abgelehnt. Der Offset gilt
+    je Gerät und Kanal; danach steht „0 dBFS entsprechen X dB“ und eine grobe Rauschgrenze da (Hinweise bei X unter 130 oder über 145).
+  - **Mikrofon-Kalibrierdatei:** Für das ECM8000 gibt es keine offizielle Datei; allgemeine Dateien für den Typ sind nur ein Näherungswert
+    (Streuung von Mikrofon zu Mikrofon bis etwa ±5 dB). Datei laden (Zeilen „Hz  dB“, REW/ARTA-Format, Kopfzeilen mit * oder #),
+    Werte eintippen oder speichern. Die Kurve wird bei 1 kHz auf 0 dB gelegt und mit einer Kette aus 65–70 breiten Peaking-Filtern
+    (Q = 2, Ausgleichsrechnung auf dichtem Raster) vor der Bewertung angewendet: Abweichung unter 0,35 dB von 20 Hz bis 16 kHz bei
+    glatten Kurven (`shared/spl.js`, geprüft in `test/spl-test.html`). Das Spektrum wird je Terzband ausgeglichen.
+  - **Übersteuerung:** erreicht der Eingang −1 dBFS, zeigt der Kopf „Übersteuert“ (4 s lang).
+  - Zahnrad außerdem: Grenzwert-Warnung (z. B. 99 dB(A)) und REW-Programm. Die Feinmessung (Frequenzgang, Nachhall usw.) macht REW.
+  - Tests: `test/spl-test.html` (Rechnung), `test/measure-test.html` (Ton, Echtzeit), `test/measure-cal-test.html` (Rauschen, Pausen,
+    Übersteuerung; Aufruf `?wav=noise|bursts|loud`). Die Testsignale erzeugt `python3 test/make-wavs.py <Ordner>`; Chrome spielt sie mit
+    `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=<Datei>` als Mikrofon ab.
 - **Main LR** groß mit Spitzenwert und Übersteuerungs-Lampe, **Auf einen Blick**: Kanäle mit Signal, stumme und übersteuerte Kanäle.
 - **REW öffnen** (Kopfzeile): startet die lokal installierte Software (sucht `REW.app` in /Applications und ~/Applications,
   sonst von Hand wählbar) und hält dafür die Live-Anzeige an, damit das Interface frei ist.

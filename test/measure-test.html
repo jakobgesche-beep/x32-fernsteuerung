@@ -92,9 +92,22 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     const off = Object.values(cals)[0];
     check('Offset gespeichert: 94 - (-23,0) = +117,0 dB', typeof off === 'number' && near(off, 117.01, 0.6), JSON.stringify(cals));
     check('nach Kalibrierung: Anzeige 94,0 dB(A), Badge "kalibriert"', near(num('m-value'), 94, 0.7) && /dB\(A\)/.test($('m-unit').textContent) && /^kalibriert/.test($('m-cal-badge').textContent), $('m-value').textContent + ' ' + $('m-unit').textContent + ' / ' + $('m-cal-badge').textContent);
-    check('Kalibrier-Meldung sichtbar', /Kalibriert: 94\.0/.test($('m-notice').textContent), $('m-notice').textContent);
+    check('Kalibrier-Meldung sichtbar: Ton bei 1 kHz erkannt, 94,0 dB = -23,0 dBFS(Z)', /Kalibriert \(Ton bei 1 kHz erkannt\): 94\.0 dB entsprechen -23\.0 dBFS\(Z\)/.test($('m-notice').textContent), $('m-notice').textContent);
+    check('Kalibrier-Info nennt Datum und "mit Kalibrator, 94 dB"', /Offset \+117,?\.?\d? dB \(\d\d\.\d\d\.\d{4}, mit Kalibrator, 94 dB\)/.test($('m-cal-info').textContent.replace('117.0', '117,0').replace('117,0', '117,0')) || /mit Kalibrator, 94 dB\)/.test($('m-cal-info').textContent), $('m-cal-info').textContent.slice(0, 120));
     check('Skala wechselt auf dB SPL (30 ... 130)', /^30/.test($('m-bar-scale').firstChild.textContent) && /130$/.test($('m-bar-scale').lastChild.textContent), $('m-bar-scale').textContent);
     await until(() => seconds() > 0 && st().meter.snapshot().w.A.leq > -Infinity, 3000);
+
+    check('Aussteuerung nach der Kalibrierung: "0 dBFS entsprechen 117 dB", Rauschgrenze grob 17 dB, Warnung "zu knapp" für laute Musik', !$('m-cal-range').hidden && /0 dBFS entsprechen 117 dB/.test($('m-cal-range').textContent) && /grob bei 17 dB/.test($('m-cal-range').textContent) && /zu knapp/.test($('m-cal-range').textContent) && $('m-cal-range').classList.contains('warn'), $('m-cal-range').textContent.slice(0, 200));
+    check('Kein Übersteuerungs-Hinweis bei -20 dBFS Spitze', $('m-clip').hidden);
+    // ---- Mikrofon-Kalibrierdatei bei kalibriertem 1-kHz-Ton: die Kurve gilt relativ zu 1 kHz, die Anzeige bleibt bei 94 dB ----
+    {
+      const r = Measure.loadCorrection('20 3\n500 3\n1000 3\n5000 -8\n20000 -8\n', 'Ton-Test');
+      check('Kalibrierdatei geladen (bei 1 kHz +3 dB in der Datei): läuft weiter, Kalibrierung bleibt', r.ok && st().running && /^kalibriert/.test($('m-cal-badge').textContent) && !!localStorage.getItem('x32.measure.cal'), JSON.stringify(r));
+      await until(() => seconds() >= 3, 8000); await sleep(600);
+      check('1-kHz-Ton mit Datei: Anzeige weiter 94,0 dB (Kurve bei 1 kHz auf 0 dB gelegt)', near(num('m-value'), 94, 0.7), $('m-value').textContent);
+      Measure.debug().ui.corrRemove.click(); await until(() => seconds() >= 3, 8000); await sleep(600);
+      check('Datei entfernt: Anzeige weiter 94,0 dB', near(num('m-value'), 94, 0.7) && /Keine Datei/.test($('m-corr-info').textContent), $('m-value').textContent);
+    }
 
     // ---- Grenzwert ----
     $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true }));

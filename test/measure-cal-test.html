@@ -1,0 +1,181 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../renderer/style.css">
+<style>body{padding:10px;} pre#out{display:none;}</style></head><body>
+<section id="measure"></section>
+<pre id="out"></pre>
+<script>try { localStorage.clear(); } catch (e) {}</script>
+<script src="../shared/spl.js"></script>
+<script>
+// Messung, Ende zu Ende, mit Rauschen statt Ton (Chrome-Testgerät spielt eine WAV-Datei):
+//   ?wav=noise   noise.wav:  weißes Rauschen (-26 dBFS Effektivwert), Pegel schwankt mit 2,3 Hz um etwa ±3 dB
+//   ?wav=bursts  bursts.wav: 1 s Rauschen, 1 s fast Stille (wie Musik mit Pausen)
+//   ?wav=loud    loud.wav:   stark übersteuertes Rauschen (Spitzen bei 0 dBFS)
+// Geprüft wird: ruhige Zahlenanzeige, Bewertung/Festhalten, Kalibrator-Prüfung (Rauschen wird abgelehnt), Kalibrieren mit Referenzgerät,
+// Mikrofon-Kalibrierdatei (laden, wirkt, speichern, entfernen). Läuft in Echtzeit; Server auf Port 8811 hält die Seite offen.
+window.__calls = [];
+window.x32API = {
+  micStatus: async () => 'granted', micRequest: async () => 'granted', openMicSettings: async () => true,
+  rewStatus: async () => ({ found: true, path: '/Applications/REW.app' }), rewOpen: async () => ({ ok: true }), rewChoose: async () => ({ ok: true }), rewDownload: async () => true,
+  saveTextFile: async (name, text) => { window.__saved = { name, text }; return { ok: true, path: '/tmp/' + name }; },
+};
+window.toast = (m, bad) => { window.__toasts = (window.__toasts || []).concat((bad ? '! ' : '') + m); };
+</script>
+<script src="../renderer/measure.js"></script>
+<script>
+const out = []; let fails = 0;
+const params = new URLSearchParams(location.search), WAV = params.get('wav') || 'noise';
+function check(name, ok, detail){ if(!ok) fails++; out.push((ok ? 'OK    ' : 'FAIL  ') + name + (detail !== undefined ? '  ' + detail : '')); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(cond, ms){ const t0 = performance.now(); while(performance.now() - t0 < (ms || 20000)){ if(cond()) return true; await sleep(40); } return false; }
+const $ = (id) => document.getElementById(id);
+const st = () => Measure.debug().S;
+const seconds = () => (st().meter ? st().meter.total / st().fs : 0);
+const num = (id) => parseFloat($(id).textContent.replace(',', '.').replace('−', '-'));
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const change = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('change', { bubbles: true })); };
+const std = (a) => { const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / a.length); };
+// Anzeige über eine Zeit beobachten: wie oft ändert sich der Text der großen Zahl, und wie stark streut sie
+async function watch(ms){
+  const seen = []; let changes = 0, last = $('m-value').textContent; const t0 = performance.now();
+  while(performance.now() - t0 < ms){ await sleep(20); const t = $('m-value').textContent; if(t !== last){ changes++; last = t; } seen.push(parseFloat(t.replace(',', '.').replace('−', '-'))); }
+  const vals = seen.filter(isFinite), distinct = []; vals.forEach((v, i) => { if(!i || v !== vals[i - 1]) distinct.push(v); });
+  return { changes, perSec: changes / (ms / 1000), std: std(distinct), n: distinct.length };
+}
+// weißes Rauschen, gemessen in Bewertung w: Anteil der Leistung, den die Bewertungskurve durchlässt (Mittelwert über die lineare Frequenz)
+function noiseGainDb(fn, fs){ let s = 0, n = 0; for(let f = 20; f < fs / 2; f += 10){ s += Math.pow(10, fn(f) / 10); n++; } return 10 * Math.log10(s / n); }
+
+(async () => {
+  try {
+    Measure.init($('measure'));
+    await Measure.show();
+    await Measure.start();
+    await until(() => seconds() >= 3.5, 20000); await sleep(500);
+    const fs = st().fs, base = 20 * Math.log10(0.05) + 10 * Math.log10(1 + 0.35 * 0.35 / 2);      // -25,76 dBFS Effektivwert des schwankenden Rauschens
+    if(WAV !== 'loud') check('Kein Übersteuerungs-Hinweis bei normalem Pegel', $('m-clip').hidden);
+    check('Rauschen kommt an: Zahl unkalibriert, Hinweis "Relativ zur Vollaussteuerung" sichtbar', !$('m-relhint').hidden && /dBFS/.test($('m-unit').textContent) && isFinite(num('m-value')), $('m-value').textContent + ' ' + $('m-unit').textContent);
+
+    if(WAV === 'noise'){
+      // ---- ruhige Zahlen ----
+      const aGain = noiseGainDb((f) => X32SPL.weightingDb('A', f, fs), fs), zA = base + aGain;
+      let w = await watch(6000);
+      check('Anzeige "langsam" (Standard): Zahl ändert sich höchstens etwa 2-mal pro Sekunde', w.perSec <= 2.3, w.changes + ' Änderungen in 6 s (' + w.perSec.toFixed(1) + '/s), Streuung ' + w.std.toFixed(2) + ' dB');
+      check('Anzeige "langsam": Wert = A-bewerteter Pegel des Rauschens (' + zA.toFixed(1) + ' dBFS(A))', near(num('m-value'), zA, 1.0), 'angezeigt ' + num('m-value') + ', erwartet ' + zA.toFixed(1));
+      const slow = w;
+      change('m-disp', 'fast'); await sleep(400); w = await watch(6000);
+      const fast = w;
+      check('Anzeige "schnell": höchstens etwa 4 Änderungen pro Sekunde', fast.perSec <= 4.5, fast.changes + ' Änderungen in 6 s');
+      change('m-disp', 'calm'); await sleep(3500); w = await watch(8000);
+      const calm = w;
+      check('Anzeige "ruhig": höchstens etwa 2 Änderungen pro Sekunde und weniger Streuung als "schnell"', calm.perSec <= 2.3 && calm.std < fast.std, 'ruhig ' + calm.perSec.toFixed(1) + '/s, Streuung ' + calm.std.toFixed(2) + ' dB; schnell Streuung ' + fast.std.toFixed(2) + ' dB');
+      check('Streuung sinkt von schnell über langsam zu ruhig (Schwankung 2,3 Hz wird geglättet)', fast.std > slow.std * 0.9 && slow.std >= calm.std * 0.8 && calm.std < 0.8, 'schnell ' + fast.std.toFixed(2) + ' > langsam ' + slow.std.toFixed(2) + ' >= ruhig ' + calm.std.toFixed(2));
+      check('"ruhig": Zahl liegt im Mittel richtig (' + zA.toFixed(1) + ')', near(num('m-value'), zA, 0.9), 'angezeigt ' + num('m-value'));
+      change('m-disp', 'slow');
+      // ---- Festhalten ----
+      await sleep(800);
+      $('m-hold').click(); const held = $('m-value').textContent, heldMax = $('m-max').textContent;
+      await sleep(2200);
+      check('Halten: Zahl und Max bleiben stehen, Knopf zeigt "Gehalten"', $('m-value').textContent === held && $('m-max').textContent === heldMax && /Gehalten/.test($('m-hold').textContent) && $('m-hold').classList.contains('on'), held + ' / ' + $('m-value').textContent);
+      $('m-hold').click(); await sleep(700);
+      check('Halten aufgehoben: Zahl läuft wieder, Knopf zeigt "Halten"', /^Halten$/.test($('m-hold').textContent) && !$('m-hold').classList.contains('on'));
+      // ---- Bewertung ----
+      change('m-weight', 'Z'); await sleep(1800);
+      const zNum = num('m-value'), zGain = base + noiseGainDb(() => 0, fs);
+      check('Bewertung dB(Z): Einheit "dBFS(Z)", Wert = unbewerteter Pegel (' + zGain.toFixed(1) + ')', /dBFS\(Z\)/.test($('m-unit').textContent) && near(zNum, zGain, 0.9), $('m-unit').textContent + ' ' + zNum);
+      change('m-weight', 'C'); await sleep(1800);
+      const cGain = base + noiseGainDb((f) => X32SPL.weightingDb('C', f, fs), fs);
+      check('Bewertung dB(C): Einheit "dBFS(C)", Wert = C-bewerteter Pegel des Rauschens (' + cGain.toFixed(1) + '; C dämpft die Höhen stärker als A, also unter A)', /dBFS\(C\)/.test($('m-unit').textContent) && near(num('m-value'), cGain, 1.0) && num('m-value') < zNum, $('m-unit').textContent + ' ' + num('m-value'));
+      change('m-weight', 'A'); await sleep(1800);
+      check('Zurück auf dB(A): Wert wie zuvor', near(num('m-value'), zA, 1.0) && /dBFS\(A\)/.test($('m-unit').textContent), $('m-value').textContent);
+
+      // ---- Kalibrator-Prüfung: Rauschen ist kein Kalibriersignal ----
+      $('m-gear').click();
+      change('m-ref', '94'); $('m-cal').click();
+      check('Kalibrator-Modus: Kalibrieren gestartet, Knopf zeigt Countdown', $('m-cal').disabled && /Kalibriere/.test($('m-cal').textContent), $('m-cal').textContent);
+      await until(() => !st().calibrating, 15000); await sleep(200);
+      check('Rauschen als "Kalibrator": abgelehnt mit Erklärung, nichts gespeichert', /kein reiner Ton/.test($('m-notice').textContent) && !localStorage.getItem('x32.measure.cal') && /nicht/.test($('m-cal-badge').textContent), $('m-notice').textContent.slice(0, 160));
+      check('Nach der Ablehnung: Knopf wieder frei, Anzeige weiter unkalibriert (dBFS)', !$('m-cal').disabled && /^Kalibrieren/.test($('m-cal').textContent) && /dBFS/.test($('m-unit').textContent));
+
+      // ---- Referenz-Messgerät ----
+      change('m-cal-mode', 'ref');
+      check('Referenz-Modus: Beschriftung "Anzeige Referenzgerät (dB(A))", 10 s, Standardwert 70', /Referenzgerät \(dB\(A\)\)/.test($('m-ref-label').textContent) && /10 s/.test($('m-cal').textContent) && $('m-ref').value === '70', $('m-ref-label').textContent + ' / ' + $('m-cal').textContent + ' / ' + $('m-ref').value);
+      change('m-ref', '72'); $('m-cal').click();
+      await sleep(2500);
+      check('Referenz-Modus: Countdown läuft (10 s)', /Kalibriere… [5-9] s|Kalibriere… 10 s/.test($('m-cal').textContent), $('m-cal').textContent);
+      const done = await until(() => !st().calibrating, 20000); await sleep(300);
+      const offA = 72 - zA, got = Object.values(JSON.parse(localStorage.getItem('x32.measure.cal') || '{}'))[0];
+      check('Referenz-Kalibrierung: Offset = 72 - A-Pegel des Rauschens (' + offA.toFixed(1) + ' dB)', done && typeof got === 'number' && near(got, offA, 1.0), 'gespeichert ' + got);
+      check('Danach: Anzeige 72 dB(A), Badge "kalibriert", Meldung "mit Referenzgerät", Info nennt Datum und Referenz', near(num('m-value'), 72, 1.2) && /dB\(A\)/.test($('m-unit').textContent) && /^kalibriert/.test($('m-cal-badge').textContent) && /mit Referenzgerät/.test($('m-notice').textContent) && /mit Referenzgerät, 72 dB\(A\)/.test($('m-cal-info').textContent), $('m-value').textContent + ' | ' + $('m-notice').textContent.slice(0, 90) + ' | ' + $('m-cal-info').textContent.slice(0, 120));
+      check('Unkalibriert-Hinweis ist weg', $('m-relhint').hidden);
+      const calNow = Measure.debug().cals; const keyNow = Object.keys(calNow)[0];
+
+      // ---- Mikrofon-Kalibrierdatei ----
+      check('Ohne Datei: "Keine Datei geladen", Entfernen/Speichern gesperrt, keine Kurve', /Keine Datei/.test($('m-corr-info').textContent) && $('m-corr-remove').disabled && $('m-corr-save').disabled && $('m-corr-plot').hidden);
+      change('m-weight', 'Z'); await sleep(300);
+      const zLeq = async () => { Measure.debug().S.meter.resetHold(); await sleep(4000); return Measure.debug().S.meter.snapshot().w.Z.leq; };
+      const before = await zLeq();
+      const bp = new Float64Array(31); for(let i = 0; i < 10; i++){ const q = Measure.debug().S.spectrum.bandPowers(); if(q) q.forEach((v, k) => { bp[k] += v / 10; }); await sleep(100); }
+      const file = '* Test-Mikrofon\n20 0\n1000 0\n2000 -6\n20000 -6\n';       // Mikrofon zeigt ab 2 kHz 6 dB zu wenig -> Ausgleich hebt um 6 dB
+      const r = Measure.loadCorrection(file, 'Test');
+      check('Datei laden: angenommen, 4 Punkte, Messung läuft weiter', r.ok && r.count === 4 && st().running, JSON.stringify(r));
+      check('Nach dem Laden: Info nennt Namen, Punkte, größte Abweichung; Kurve sichtbar; Entfernen/Speichern frei', /„Test“: 4 Punkte/.test($('m-corr-info').textContent) && /−6,0 dB bei 2,0 kHz/.test($('m-corr-info').textContent) && !$('m-corr-plot').hidden && !$('m-corr-remove').disabled && !$('m-corr-save').disabled, $('m-corr-info').textContent);
+      await until(() => seconds() >= 1.5, 8000);
+      // Erwartung aus dem echten Spektrum vor dem Laden: Leistung je Terzband mal Ausgleich der Datei bei der Bandmitte (unabhängig vom Filter)
+      const pts = X32SPL.parseMicCal(file).points, ref1k = X32SPL.micCalDb(pts, 1000);
+      let sum0 = 0, sum1 = 0; bp.forEach((v, k) => { sum0 += v; sum1 += v * Math.pow(10, -(X32SPL.micCalDb(pts, X32SPL.THIRD_OCTAVE_CENTERS[k]) - ref1k) / 10); });
+      const after = await zLeq(), exp = 10 * Math.log10(sum1 / sum0);
+      check('Die Datei wirkt auf die Messung: unbewerteter Pegel des Rauschens steigt um ' + exp.toFixed(1) + ' dB (Ausgleich +6 dB über 2 kHz, Rechnung aus dem echten Spektrum)', near(after - before, exp, 0.6), 'vorher ' + before.toFixed(2) + ', nachher ' + after.toFixed(2) + ', Differenz ' + (after - before).toFixed(2));
+      check('Datei bleibt gespeichert (für Eingang und Kanal) und überlebt die Kalibrierung', !!localStorage.getItem('x32.measure.corr') && keyNow === Object.keys(Measure.debug().corrs)[0], Object.keys(Measure.debug().corrs).join());
+      // Speichern und wieder einlesen
+      $('m-corr-save').click(); await sleep(200);
+      const sv = window.__saved;
+      check('Speichern: Datei "Mikrofon-Kalibrierung_Test.txt", wieder lesbar mit denselben Punkten', sv && sv.name === 'Mikrofon-Kalibrierung_Test.txt' && (() => { const q = X32SPL.parseMicCal(sv.text); return q.ok && q.points.length === 4 && q.points[2][0] === 2000 && q.points[2][1] === -6; })(), sv && sv.name + ' ' + JSON.stringify(sv.text.split('\n').slice(0, 4)));
+      // Ungültige Datei ändert nichts
+      const bad = Measure.loadCorrection('hallo welt', 'Kaputt');
+      check('Ungültige Datei: abgelehnt mit Meldung, die geladene Kurve bleibt', !bad.ok && /Zeilen/.test(bad.error) && /„Test“/.test($('m-corr-info').textContent) && window.__toasts.some((t) => /^! .*nicht brauchbar/.test(t)), JSON.stringify(bad).slice(0, 100));
+      // Bearbeiten im Editor
+      $('m-corr-edit').click();
+      check('Werte eingeben: Editor öffnet sich mit den aktuellen Werten', !$('m-corr-editor').hidden && /2000/.test($('m-corr-text').value), $('m-corr-text').value.split('\n').slice(0, 3).join(' | '));
+      $('m-corr-text').value = '20;0\n1000;0\n4000;3,0\n20000;3,0'; $('m-corr-apply').click(); await sleep(200);
+      check('Übernehmen: neue Werte gelten, Editor schließt sich', /„Test“: 4 Punkte/.test($('m-corr-info').textContent) && /\+3,0 dB bei 4,0 kHz/.test($('m-corr-info').textContent) && $('m-corr-editor').hidden, $('m-corr-info').textContent.slice(0, 120));
+      // Datei über die Dateiauswahl
+      const dt = new DataTransfer(); dt.items.add(new File(['20 -1\n100 0\n1000 0\n8000 2\n20000 -2\n'], 'ECM8000-Allgemein.txt', { type: 'text/plain' }));
+      $('m-corr-file').files = dt.files; $('m-corr-file').dispatchEvent(new Event('change', { bubbles: true }));
+      await until(() => /ECM8000-Allgemein/.test($('m-corr-info').textContent), 3000);
+      check('Datei über die Dateiauswahl: Name ohne Endung, 5 Punkte', /„ECM8000-Allgemein“: 5 Punkte/.test($('m-corr-info').textContent), $('m-corr-info').textContent.slice(0, 100));
+      // Entfernen
+      $('m-corr-remove').click(); await until(() => seconds() >= 1.5, 8000);
+      const removed = await zLeq();
+      check('Entfernen: wieder "Keine Datei", Pegel wie vorher (±0,3 dB)', /Keine Datei/.test($('m-corr-info').textContent) && $('m-corr-plot').hidden && near(removed, before, 0.3) && !localStorage.getItem('x32.measure.corr').includes('points'), 'vorher ' + before.toFixed(2) + ', jetzt ' + removed.toFixed(2));
+      check('Die Pegel-Kalibrierung bleibt beim Wechsel der Datei erhalten (72 dB(A))', /^kalibriert/.test($('m-cal-badge').textContent) && Object.values(Measure.debug().cals)[0] === got);
+    }
+
+    if(WAV === 'loud'){
+      await until(() => !$('m-clip').hidden, 4000);
+      check('Übersteuertes Signal (Spitzen 0 dBFS): Hinweis "Übersteuert" erscheint im Kopf', !$('m-clip').hidden && /Übersteuert/.test($('m-clip').textContent));
+      change('m-cal-mode', 'ref'); $('m-gear').click(); $('m-cal').click(); await until(() => !st().calibrating, 20000); await sleep(300);
+      check('Kalibrieren mit übersteuertem Signal: abgelehnt ("übersteuert"), nichts gespeichert', /übersteuert/.test($('m-notice').textContent) && !localStorage.getItem('x32.measure.cal'), $('m-notice').textContent.slice(0, 120));
+    }
+    if(WAV === 'bursts'){
+      change('m-cal-mode', 'ref'); change('m-ref', '70'); $('m-gear').click(); $('m-cal').click();
+      await until(() => !st().calibrating, 20000); await sleep(300);
+      check('Rauschen mit Pausen als Referenz: abgelehnt ("schwankt"), nichts gespeichert', /schwankt/.test($('m-notice').textContent) && !localStorage.getItem('x32.measure.cal') && /nicht/.test($('m-cal-badge').textContent), $('m-notice').textContent.slice(0, 200));
+      change('m-cal-mode', 'tone'); change('m-ref', '94'); $('m-cal').click();
+      await until(() => !st().calibrating, 15000); await sleep(300);
+      check('Rauschen mit Pausen als Kalibrator: ebenfalls abgelehnt (kein Ton oder schwankt)', /kein reiner Ton|schwankt/.test($('m-notice').textContent) && !localStorage.getItem('x32.measure.cal'), $('m-notice').textContent.slice(0, 200));
+    }
+    if(params.get('shot')){                                    // Bildschirmfoto: Messung läuft weiter, Referenz-Kalibrierung und Datei geladen
+      if(!st().running) await Measure.start();
+      Measure.loadCorrection('* ECM8000 (Beispielwerte)\n20 -1.5\n50 -0.5\n100 0\n500 0.2\n1000 0\n2000 0.5\n4000 1.2\n8000 2.5\n12000 3.8\n16000 2.0\n20000 -1.5\n', 'ECM8000 Beispiel');
+      if($('m-settings').hidden) $('m-gear').click();
+      await sleep(2500);
+    } else Measure.stop();
+  } catch (e) {
+    fails++; out.push('FAIL  Ausnahme: ' + (e && e.stack || e));
+  }
+  out.push(fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+  $('out').textContent = out.join('\n');
+  try { await fetch('http://127.0.0.1:8811/result', { method: 'POST', mode: 'no-cors', body: out.join('\n') }); } catch (e) {}
+})();
+</script>
+<script src="http://127.0.0.1:8811/wait"></script>
+</body></html>
