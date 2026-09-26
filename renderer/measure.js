@@ -8,9 +8,9 @@ const Measure = (function () {
   const SETTINGS_KEY = 'x32.measure.settings';
   const CAL_KEY = 'x32.measure.cal';
   const META_KEY = 'x32.measure.calmeta';    // wann und womit kalibriert wurde
-  const CORR_KEY = 'x32.measure.corr';       // Mikrofon-Kalibrierdatei (Frequenzgang) je Eingang und Kanal
   const WARMUP_S = 1;              // Einschwingen der Filter: Maximum/Leq danach neu starten
   const CAL_SECONDS = 3;           // Kalibrator: reiner Ton, 3 s reichen
+  const MANUAL_MIN = 40, MANUAL_MAX = 200;   // Ausgleichswert von Hand (dB): 0 dBFS entsprechen so vielen dB
   const CAL_SECONDS_REF = 10;      // Referenz-Messgerät: Rauschen oder Musik, 10 s Mittelwert
   // Aussteuerung: 0 dBFS entsprechen O dB. Laute Musik am FOH hat Spitzen bis etwa 130 dB -> O sollte mindestens 130 sein (sonst übersteuert das Interface).
   // Das Rauschen eines guten 24-Bit-Interfaces mit Mikrofonvorverstärker liegt grob bei -100 dBFS(A) -> Rauschgrenze O - 100 dB; über O = 145 sind leise Räume (unter 45 dB) nicht mehr messbar.
@@ -27,9 +27,9 @@ const Measure = (function () {
 
   // weighting: Bewertung A (wie das Ohr), C (Bass stärker), Z (unbewertet). disp: wie träge die große Zahl ist:
   // fast = 125 ms (zappelt), slow = 1 s (Schallpegelmesser "Slow", Standard), calm = zusätzlich über etwa 3 s geglättet.
-  const cfg = Object.assign({ deviceId: '', deviceLabel: '', channel: 0, weighting: 'A', disp: 'slow', limitOn: false, limit: 99, ref: 94, calMode: 'tone', refDev: 70 }, load(SETTINGS_KEY, {}));
-  const cals = load(CAL_KEY, {}), calMeta = load(META_KEY, {}), corrs = load(CORR_KEY, {});
-  if (!['tone', 'ref'].includes(cfg.calMode)) cfg.calMode = 'tone';
+  const cfg = Object.assign({ deviceId: '', deviceLabel: '', channel: 0, weighting: 'A', disp: 'slow', limitOn: false, limit: 99, ref: 94, calMode: 'tone', refDev: 70, manualOffset: 100 }, load(SETTINGS_KEY, {}));
+  const cals = load(CAL_KEY, {}), calMeta = load(META_KEY, {});
+  if (!['tone', 'ref', 'manual'].includes(cfg.calMode)) cfg.calMode = 'tone';
   if (!['A', 'C', 'Z'].includes(cfg.weighting)) cfg.weighting = 'A';
   if (!['fast', 'slow', 'calm'].includes(cfg.disp)) cfg.disp = 'slow';
   const tcKey = () => (cfg.disp === 'fast' ? 'fast' : 'slow');        // welcher Wert des Messgeräts (Fast 125 ms / Slow 1 s) zugrunde liegt
@@ -176,26 +176,12 @@ registerProcessor('x32-tap', X32Tap);`;
       <section>
         <div class="m-card-title">Kalibrierung</div>
         <p class="m-help">Ohne Kalibrierung zeigt die App nur relative Werte (dBFS, immer unter 0), keine echten dB. Dafür braucht sie einmal einen bekannten Pegel:</p>
-        <div class="m-row"><label class="m-field"><span>Womit kalibrieren?</span><select id="m-cal-mode" class="lp-sel" aria-label="Art der Kalibrierung"><option value="tone">Kalibrator (reiner Ton)</option><option value="ref">Referenz-Messgerät (Rauschen)</option></select></label></div>
+        <div class="m-row"><label class="m-field"><span>Womit kalibrieren?</span><select id="m-cal-mode" class="lp-sel" aria-label="Art der Kalibrierung"><option value="tone">Kalibrator (reiner Ton)</option><option value="ref">Referenz-Messgerät (Rauschen)</option><option value="manual">Ausgleichswert von Hand</option></select></label></div>
         <p class="m-help" id="m-cal-how"></p>
         <div class="m-row"><label class="m-field m-field-narrow"><span id="m-ref-label">Pegel des Kalibrators (dB)</span><input id="m-ref" type="number" step="0.1" min="30" max="140"></label>
           <button id="m-cal" class="btn secondary small">Kalibrieren (3 s)</button><button id="m-cal-reset" class="btn secondary small">Zurücksetzen</button></div>
         <p class="m-help small" id="m-cal-info"></p>
         <p class="m-help small" id="m-cal-range" hidden></p>
-      </section>
-      <section>
-        <div class="m-card-title">Mikrofon-Kalibrierdatei</div>
-        <p class="m-help">Jedes Mikrofon ist bei manchen Frequenzen etwas lauter oder leiser. Eine Datei mit diesen Abweichungen gleicht das aus (Spektrum und dB-Werte). Ohne Datei gilt das Mikrofon als ideal flach: beim Behringer ECM8000 ist der dB(A)-Wert dadurch meist nur um 1–2 dB daneben, das Spektrum in den Höhen etwas mehr.</p>
-        <div class="m-row"><button id="m-corr-load" class="btn secondary small">Datei laden…</button><button id="m-corr-edit" class="btn secondary small">Werte eingeben…</button><button id="m-corr-save" class="btn secondary small">Speichern…</button><button id="m-corr-remove" class="btn secondary small">Entfernen</button>
-          <input id="m-corr-file" type="file" accept=".txt,.csv,.cal,.frd,text/plain" hidden></div>
-        <p class="m-help small" id="m-corr-info"></p>
-        <canvas id="m-corr-plot" class="m-corr-plot" hidden></canvas>
-        <div id="m-corr-editor" hidden>
-          <textarea id="m-corr-text" class="m-corr-text" rows="8" spellcheck="false" placeholder="20   -1,0&#10;100   0,0&#10;1000   0,0&#10;8000   1,5&#10;12000   3,0&#10;20000   -2,0"></textarea>
-          <div class="m-row"><button id="m-corr-apply" class="btn small">Übernehmen</button><button id="m-corr-cancel" class="btn secondary small">Abbrechen</button></div>
-          <p class="m-help small">Eine Zeile je Messpunkt: Frequenz in Hz, dann die Abweichung in dB (plus = das Mikrofon zeigt dort zu viel). Trenner: Leerzeichen, Tab, Semikolon oder Komma. Zeilen mit # oder * sind Kommentare. Die Kurve wird bei 1 kHz auf 0 dB gelegt, deine Pegel-Kalibrierung bleibt also gültig.</p>
-        </div>
-        <p class="m-help small">Für das ECM8000 gibt Behringer keine Datei heraus. Allgemeine Dateien für diesen Mikrofontyp findest du in Foren (z. B. HomeTheaterShack, Suche „ECM8000 calibration file“). Sie sind nur ein Näherungswert: einzelne Mikrofone weichen bis etwa ±5 dB davon ab. Eine eigene Datei entsteht unter „Werte eingeben…“, z. B. aus dem Diagramm im Datenblatt. Danach mit „Speichern…“ sichern.</p>
       </section>
       <section>
         <div class="m-card-title">Grenzwert-Warnung</div>
@@ -223,8 +209,6 @@ registerProcessor('x32-tap', X32Tap);`;
       leq30: q('m-leq30'), leq30s: q('m-leq30-s'), leq30card: q('m-leq30-card'), max: q('m-max'), reset: q('m-reset'),
       canvas: q('m-rta'), rtaRead: q('m-rta-read'), hist: q('m-hist'), histRead: q('m-hist-read'), histSave: q('m-hist-save'),
       ref: q('m-ref'), cal: q('m-cal'), calReset: q('m-cal-reset'), calBadge: q('m-cal-badge'), clip: q('m-clip'), calInfo: q('m-cal-info'), calRange: q('m-cal-range'), calMode: q('m-cal-mode'), calHow: q('m-cal-how'), refLabel: q('m-ref-label'),
-      corrLoad: q('m-corr-load'), corrEdit: q('m-corr-edit'), corrSave: q('m-corr-save'), corrRemove: q('m-corr-remove'), corrFile: q('m-corr-file'), corrInfo: q('m-corr-info'),
-      corrPlot: q('m-corr-plot'), corrEditor: q('m-corr-editor'), corrText: q('m-corr-text'), corrApply: q('m-corr-apply'), corrCancel: q('m-corr-cancel'),
       limitOn: q('m-limit-on'), limit: q('m-limit'),
       rewInfo: q('m-rew-info'), rewChoose: q('m-rew-choose'), rewDl: q('m-rew-dl'),
     };
@@ -250,26 +234,13 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.reset.addEventListener('click', () => { if (S.meter) S.meter.resetHold(); if (S.hold) S.hold.fill(-Infinity); S.frozen = false; resetReading(); paintText(true); });
     ui.calMode.addEventListener('change', () => { cfg.calMode = ui.calMode.value; persistCfg(); updateCalMode(); });
     ui.ref.addEventListener('change', () => {
-      if (cfg.calMode === 'ref') { cfg.refDev = clamp(parseFloat(ui.ref.value) || 70, 30, 140); ui.ref.value = cfg.refDev; }
+      if (cfg.calMode === 'manual') { cfg.manualOffset = clamp(parseFloat(ui.ref.value) || 100, MANUAL_MIN, MANUAL_MAX); ui.ref.value = cfg.manualOffset; }
+      else if (cfg.calMode === 'ref') { cfg.refDev = clamp(parseFloat(ui.ref.value) || 70, 30, 140); ui.ref.value = cfg.refDev; }
       else { cfg.ref = clamp(parseFloat(ui.ref.value) || 94, 30, 140); ui.ref.value = cfg.ref; }
       persistCfg();
     });
     ui.cal.addEventListener('click', calibrate);
     ui.calReset.addEventListener('click', () => { delete cals[calKey()]; delete calMeta[calKey()]; save(CAL_KEY, cals); save(META_KEY, calMeta); updateCalUi(); buildScale(); paintText(true); });
-    ui.corrLoad.addEventListener('click', () => ui.corrFile.click());
-    ui.corrFile.addEventListener('change', () => {
-      const f = ui.corrFile.files && ui.corrFile.files[0];
-      if (!f) return;
-      const rd = new FileReader();
-      rd.onload = () => corrFeedback(setCorrection(String(rd.result || ''), f.name.replace(/\.[^.]+$/, '')), f.name);
-      rd.onerror = () => corrFeedback({ ok: false, error: 'Die Datei konnte nicht gelesen werden.' });
-      rd.readAsText(f); ui.corrFile.value = '';
-    });
-    ui.corrEdit.addEventListener('click', () => { ui.corrEditor.hidden = !ui.corrEditor.hidden; if (!ui.corrEditor.hidden) { const c = corrOf(); ui.corrText.value = c ? SPL.micCalToText(c.points) : ''; ui.corrText.focus(); } });
-    ui.corrCancel.addEventListener('click', () => { ui.corrEditor.hidden = true; });
-    ui.corrApply.addEventListener('click', () => { const c = corrOf(), r = setCorrection(ui.corrText.value, c ? c.name : 'Eigene Werte'); corrFeedback(r); if (r.ok) ui.corrEditor.hidden = true; });
-    ui.corrRemove.addEventListener('click', () => { removeCorrection(); ui.corrEditor.hidden = true; });
-    ui.corrSave.addEventListener('click', saveCorrection);
     ui.limitOn.addEventListener('change', () => { cfg.limitOn = ui.limitOn.checked; persistCfg(); paintText(true); });
     ui.limit.addEventListener('change', () => { cfg.limit = clamp(parseFloat(ui.limit.value) || 99, 30, 140); ui.limit.value = cfg.limit; persistCfg(); paintText(true); });
     ui.histSave.addEventListener('click', saveProtocol);
@@ -345,9 +316,7 @@ registerProcessor('x32-tap', X32Tap);`;
 
   // ---------- Start / Stop ----------
   function freshMeters() {
-    const cp = corrPoints();                                     // Mikrofon-Kalibrierdatei (Frequenzgang), falls geladen
-    S.meter = new SPL.SplMeter(S.fs, cp ? { micCal: cp } : undefined); S.spectrum = new SPL.Spectrum(S.fs, FFT_SIZE);
-    if (cp) S.spectrum.setMicCal(cp);
+    S.meter = new SPL.SplMeter(S.fs); S.spectrum = new SPL.Spectrum(S.fs, FFT_SIZE);
     S.startedAt = Date.now(); histCount = -1;
     S.avg = null; S.hold = new Float64Array(SPL.THIRD_OCTAVE_CENTERS.length).fill(-Infinity); S.levels = null; S.snap = null; S.warm = false;
     S.calibrating = null; S.clipAt = -1e9; resetReading();
@@ -409,23 +378,39 @@ registerProcessor('x32-tap', X32Tap);`;
   }
 
   // ---------- Kalibrierung ----------
-  // Zwei Wege zum bekannten Pegel:
+  // Drei Wege zum bekannten Pegel (der dritte, der Ausgleichswert von Hand, misst nichts):
   //  - Kalibrator: reiner Ton (z. B. 94 dB bei 1 kHz), 3 s. Gemessen wird unbewertet (Z), denn ein Kalibrator nennt den Pegel ohne Bewertung.
   //    Die App prüft, ob wirklich ein ruhiger Einzelton anliegt (sonst würde Musik oder Raumlärm als "94 dB" gelten).
   //  - Referenz-Messgerät: gleichmäßiges Rauschen, 10 s Mittelwert in der gewählten Bewertung; der Nutzer trägt ab, was das andere Gerät zeigt.
-  const calLabel = () => 'Kalibrieren (' + (cfg.calMode === 'ref' ? CAL_SECONDS_REF : CAL_SECONDS) + ' s)';
+  const calLabel = () => (cfg.calMode === 'manual' ? 'Übernehmen' : 'Kalibrieren (' + (cfg.calMode === 'ref' ? CAL_SECONDS_REF : CAL_SECONDS) + ' s)');
   const wname = (w) => 'dBFS(' + w + ')';
+  const CAL_HOW = {
+    tone: 'Kalibrator (meist 94 dB bei 1 kHz) fest auf das Mikrofon setzen und einschalten, Pegel eintragen, „Kalibrieren“ drücken. Die App prüft, dass wirklich ein ruhiger Ton anliegt, und rechnet unbewertet, wie es der Kalibrator angibt.',
+    manual: 'Den Wert kennst du schon (siehe „Offset“ unten, zum Beispiel von einem anderen Rechner)? Trage ihn hier ein: Angezeigt wird dann der Pegel in dBFS plus dieser Ausgleichswert. Die App nimmt ihn als genau an, es wird nichts gemessen. Er gilt nur bei unveränderter Verstärkung am Interface.',
+  };
   function updateCalMode() {
-    const ref = cfg.calMode === 'ref';
-    ui.calMode.value = cfg.calMode;
-    ui.refLabel.textContent = ref ? 'Anzeige Referenzgerät (dB(' + cfg.weighting + '))' : 'Pegel des Kalibrators (dB)';
-    ui.ref.value = ref ? cfg.refDev : cfg.ref;
+    const mode = cfg.calMode, ref = mode === 'ref', manual = mode === 'manual';
+    ui.calMode.value = mode;
+    ui.refLabel.textContent = manual ? 'Ausgleichswert (dB)' : ref ? 'Anzeige Referenzgerät (dB(' + cfg.weighting + '))' : 'Pegel des Kalibrators (dB)';
+    ui.ref.min = manual ? MANUAL_MIN : 30; ui.ref.max = manual ? MANUAL_MAX : 140;
+    ui.ref.value = manual ? (offset() !== null ? Math.round(offset() * 10) / 10 : cfg.manualOffset) : ref ? cfg.refDev : cfg.ref;
     ui.cal.textContent = S.calibrating ? ui.cal.textContent : calLabel();
     ui.calHow.textContent = ref
       ? 'Ohne Kalibrator: Ein zweites Messgerät (Schallpegelmesser oder Handy-App) dicht neben das Mikrofon legen. Gleichmäßiges Rauschen abspielen, am besten Rosa Rauschen (auch der eingebaute Oszillator des Pults kann das; vorsichtig aufdrehen). Wert des Referenzgeräts eintragen, gleiche Bewertung wie oben (' + cfg.weighting + '), und ' + CAL_SECONDS_REF + ' s messen. Musik mit Pausen geht nicht. Handy-Apps sind nur auf etwa ±2–3 dB genau, ein echter Schallpegelmesser deutlich besser.'
-      : 'Kalibrator (meist 94 dB bei 1 kHz) fest auf das Mikrofon setzen und einschalten, Pegel eintragen, „Kalibrieren“ drücken. Die App prüft, dass wirklich ein ruhiger Ton anliegt, und rechnet unbewertet, wie es der Kalibrator angibt.';
+      : CAL_HOW[mode];
+  }
+  // Ausgleichswert direkt eintragen: kein Messen, gilt sofort (auch ohne laufende Messung)
+  function applyManual() {
+    const v = clamp(parseFloat(ui.ref.value) || cfg.manualOffset, MANUAL_MIN, MANUAL_MAX);
+    cfg.manualOffset = v; ui.ref.value = v; persistCfg();
+    cals[calKey()] = v; save(CAL_KEY, cals);
+    calMeta[calKey()] = { mode: 'manual', ref: v, at: Date.now() }; save(META_KEY, calMeta);
+    if (S.meter) S.meter.resetHold(); if (S.hold) S.hold.fill(-Infinity);
+    notice('Ausgleichswert +' + v.toFixed(1) + ' dB übernommen: 0 dBFS entsprechen ' + v.toFixed(1) + ' dB.', [], 'good');
+    updateCalUi(); buildScale(); resetReading(); paintText(true);
   }
   function calibrate() {
+    if (cfg.calMode === 'manual') { applyManual(); return; }
     if (!S.running || !S.meter) { notice('Zum Kalibrieren zuerst die Messung starten.', [], 'warn'); return; }
     if (S.calibrating) return;
     const ref = cfg.calMode === 'ref';
@@ -472,7 +457,7 @@ registerProcessor('x32-tap', X32Tap);`;
     ui.calBadge.textContent = o === null ? 'nicht kalibriert' : 'kalibriert'; ui.calBadge.className = 'm-badge ' + (o === null ? 'warn' : 'good');
     const dev = cfg.deviceLabel || 'Eingang', chn = cfg.channel < 0 ? 'gemittelt' : cfg.channel + 1;
     ui.calInfo.textContent = o === null ? 'Für „' + dev + '“, Kanal ' + chn + ' liegt noch keine Kalibrierung vor.'
-      : 'Offset ' + (o >= 0 ? '+' : '') + o.toFixed(1) + ' dB' + (m ? ' (' + dateDe(m.at) + ', ' + (m.mode === 'ref' ? 'mit Referenzgerät, ' + m.ref + ' dB(' + m.w + ')' : 'mit Kalibrator, ' + m.ref + ' dB') + ')' : '') + ', gespeichert für „' + dev + '“, Kanal ' + chn + '. Gilt nur bei unveränderter Interface-Verstärkung.';
+      : 'Offset ' + (o >= 0 ? '+' : '') + o.toFixed(1) + ' dB' + (m ? ' (' + dateDe(m.at) + ', ' + (m.mode === 'ref' ? 'mit Referenzgerät, ' + m.ref + ' dB(' + m.w + ')' : m.mode === 'manual' ? 'von Hand eingetragen' : 'mit Kalibrator, ' + m.ref + ' dB') + ')' : '') + ', gespeichert für „' + dev + '“, Kanal ' + chn + '. Gilt nur bei unveränderter Interface-Verstärkung.';
     ui.calReset.disabled = o === null;
     ui.calRange.hidden = o === null;
     if (o !== null) {
@@ -483,69 +468,6 @@ registerProcessor('x32-tap', X32Tap);`;
       ui.calRange.className = 'm-help small' + (tight || low ? ' warn' : '');
     }
     ui.unit.textContent = unit();
-    updateCorrUi();
-  }
-
-  // ---------- Mikrofon-Kalibrierdatei (Frequenzgang) ----------
-  // Je Eingang und Kanal eine Kurve; sie wirkt vor den Bewertungen (dB(A) usw.) und im Spektrum. Bei 1 kHz gleich 0 dB (siehe shared/spl.js).
-  const corrOf = () => { const c = corrs[calKey()]; return c && Array.isArray(c.points) && c.points.length >= 3 ? c : null; };
-  const corrPoints = () => { const c = corrOf(); return c ? c.points : null; };
-  const fHz = (f) => (f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1).replace('.', ',') + ' kHz' : Math.round(f) + ' Hz');
-  const signed = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1).replace('.', ',');
-  function setCorrection(text, name) {
-    const r = SPL.parseMicCal(text);
-    if (!r.ok) return { ok: false, error: r.error };
-    corrs[calKey()] = { name: name || 'Eigene Werte', points: r.points, at: Date.now() }; save(CORR_KEY, corrs);
-    applyCorrection(); updateCorrUi();
-    return { ok: true, count: r.points.length, skipped: r.skipped, name: corrs[calKey()].name };
-  }
-  function removeCorrection() {
-    if (!corrOf()) return;
-    delete corrs[calKey()]; save(CORR_KEY, corrs);
-    applyCorrection(); updateCorrUi(); corrMsg('Kalibrierdatei entfernt: das Mikrofon gilt wieder als ideal flach.', false);
-  }
-  // Läuft die Messung, beginnt sie mit der neuen Kurve von vorn (Zähler, Leq und Spektrum passen sonst nicht zusammen)
-  function applyCorrection() { if (S.running && S.fs && !S.calibrating) { freshMeters(); if (S.cap) S.cap.setChannel(cfg.channel); paintText(true); } }
-  function corrMsg(text, isBad) { say(text, !!isBad); if (ui && ui.corrInfo) ui.corrInfo.dataset.msg = text; }
-  function corrFeedback(r, fileName) {
-    if (!r.ok) { corrMsg('Die Datei „' + (fileName || 'Eingabe') + '“ ist nicht brauchbar. ' + r.error, true); return; }
-    corrMsg('Kalibrierdatei „' + r.name + '“ geladen (' + r.count + ' Punkte' + (r.skipped ? ', ' + r.skipped + ' Zeilen übersprungen' : '') + ').' + (S.running ? ' Die Messung wurde mit dem Ausgleich neu gestartet.' : ''), false);
-  }
-  function updateCorrUi() {
-    if (!ui) return;
-    const c = corrOf();
-    if (!c) { ui.corrInfo.textContent = 'Keine Datei geladen: das Mikrofon gilt als ideal flach.'; }
-    else {
-      const ref = SPL.micCalDb(c.points, 1000), norm = c.points.map((p) => [p[0], p[1] - ref]), mx = SPL.micCalMax(norm);
-      ui.corrInfo.textContent = '„' + c.name + '“: ' + c.points.length + ' Punkte von ' + fHz(c.points[0][0]) + ' bis ' + fHz(c.points[c.points.length - 1][0]) + ', größte Abweichung ' + signed(mx[1]) + ' dB bei ' + fHz(mx[0]) + ' (Kurve bei 1 kHz auf 0 dB gelegt). Gilt für „' + (cfg.deviceLabel || 'Eingang') + '“, Kanal ' + (cfg.channel < 0 ? 'gemittelt' : cfg.channel + 1) + '.';
-    }
-    ui.corrRemove.disabled = ui.corrSave.disabled = !c;
-    ui.corrPlot.hidden = !c;
-    if (c) drawCorr(c.points);
-  }
-  // kleine Kurve: Abweichung des Mikrofons (dB) über die Frequenz (20 Hz ... 20 kHz, logarithmisch)
-  function drawCorr(points) {
-    const cv = ui.corrPlot, dpr = window.devicePixelRatio || 1, cw = cv.clientWidth || 300, ch = cv.clientHeight || 78;
-    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
-    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, ch);
-    const ref = SPL.micCalDb(points, 1000), L = 30, R = 6, T = 6, B = 16, x0 = L, x1 = cw - R, y0 = T, y1 = ch - B;
-    const dev = (f) => SPL.micCalDb(points, f) - ref, fr = []; for (let i = 0; i <= 120; i++) fr.push(20 * Math.pow(1000, i / 120));
-    const span = Math.max(3, Math.ceil(Math.max.apply(null, fr.map((f) => Math.abs(dev(f)))) + 0.5)), xOf = (f) => x0 + (Math.log10(f / 20) / 3) * (x1 - x0), yOf = (v) => (y0 + y1) / 2 - (v / span) * ((y1 - y0) / 2);
-    g.font = '10px "IBM Plex Mono", monospace'; g.fillStyle = '#7C8698'; g.strokeStyle = 'rgba(255,255,255,0.10)'; g.lineWidth = 1; g.textBaseline = 'middle'; g.textAlign = 'right';
-    [span, 0, -span].forEach((v) => { g.beginPath(); g.moveTo(x0, Math.round(yOf(v)) + 0.5); g.lineTo(x1, Math.round(yOf(v)) + 0.5); g.stroke(); g.fillText((v > 0 ? '+' : '') + v, x0 - 4, yOf(v)); });
-    g.textBaseline = 'top'; g.textAlign = 'center';
-    [[100, '100'], [1000, '1k'], [10000, '10k']].forEach(([f, l]) => g.fillText(l, xOf(f), y1 + 3));
-    g.strokeStyle = chartColors().main; g.lineWidth = 1.6; g.lineJoin = 'round'; g.beginPath();
-    fr.forEach((f, i) => { const x = xOf(f), y = yOf(dev(f)); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke();
-  }
-  async function saveCorrection() {
-    const c = corrOf();
-    if (!c) return;
-    const safe = String(c.name).replace(/[^\wäöüÄÖÜß.-]+/g, '_').slice(0, 40) || 'Mikrofon';
-    const head = '* Mikrofon-Kalibrierdatei, gespeichert von X32 Fernsteuerung\n* Frequenz in Hz, Abweichung in dB (plus = Mikrofon zeigt zu viel)\n';
-    const r = await api.saveTextFile('Mikrofon-Kalibrierung_' + safe + '.txt', head + SPL.micCalToText(c.points));
-    if (r.ok) say('Kalibrierdatei gespeichert.');
-    else if (!r.canceled) say('Speichern fehlgeschlagen: ' + (r.error || 'unbekannt'), true);
   }
 
   // ---------- Anzeige ----------
@@ -825,7 +747,6 @@ registerProcessor('x32-tap', X32Tap);`;
     start, stop, openRew,
     forceScriptProcessor: false,
     buildCsv, drawHist, redraw() { drawRta(); drawHist(); },
-    loadCorrection(text, name) { const r = setCorrection(text, name); corrFeedback(r, name); return r; },
-    debug: () => ({ S, cfg, cals, calMeta, corrs, offset: offset(), ui }),
+    debug: () => ({ S, cfg, cals, calMeta, offset: offset(), ui }),
   };
 })();

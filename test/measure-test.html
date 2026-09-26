@@ -99,16 +99,6 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
     check('Aussteuerung nach der Kalibrierung: "0 dBFS entsprechen 117 dB", Rauschgrenze grob 17 dB, Warnung "zu knapp" für laute Musik', !$('m-cal-range').hidden && /0 dBFS entsprechen 117 dB/.test($('m-cal-range').textContent) && /grob bei 17 dB/.test($('m-cal-range').textContent) && /zu knapp/.test($('m-cal-range').textContent) && $('m-cal-range').classList.contains('warn'), $('m-cal-range').textContent.slice(0, 200));
     check('Kein Übersteuerungs-Hinweis bei -20 dBFS Spitze', $('m-clip').hidden);
-    // ---- Mikrofon-Kalibrierdatei bei kalibriertem 1-kHz-Ton: die Kurve gilt relativ zu 1 kHz, die Anzeige bleibt bei 94 dB ----
-    {
-      const r = Measure.loadCorrection('20 3\n500 3\n1000 3\n5000 -8\n20000 -8\n', 'Ton-Test');
-      check('Kalibrierdatei geladen (bei 1 kHz +3 dB in der Datei): läuft weiter, Kalibrierung bleibt', r.ok && st().running && /^kalibriert/.test($('m-cal-badge').textContent) && !!localStorage.getItem('x32.measure.cal'), JSON.stringify(r));
-      await until(() => seconds() >= 3, 8000); await sleep(600);
-      check('1-kHz-Ton mit Datei: Anzeige weiter 94,0 dB (Kurve bei 1 kHz auf 0 dB gelegt)', near(num('m-value'), 94, 0.7), $('m-value').textContent);
-      Measure.debug().ui.corrRemove.click(); await until(() => seconds() >= 3, 8000); await sleep(600);
-      check('Datei entfernt: Anzeige weiter 94,0 dB', near(num('m-value'), 94, 0.7) && /Keine Datei/.test($('m-corr-info').textContent), $('m-value').textContent);
-    }
-
     // ---- Grenzwert ----
     $('m-limit').value = '90'; $('m-limit').dispatchEvent(new Event('change', { bubbles: true }));
     $('m-limit-on').checked = true; $('m-limit-on').dispatchEvent(new Event('change', { bubbles: true }));
@@ -143,6 +133,18 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
     // (wird in der Rechnungs-Prüfung abgedeckt; hier: Zurücksetzen der Kalibrierung)
     $('m-cal-reset').click(); await sleep(200);
     check('Kalibrierung zurücksetzen: wieder dBFS', /dBFS/.test($('m-unit').textContent) && /nicht/.test($('m-cal-badge').textContent));
+
+    // ---- Ausgleichswert von Hand: kein Messen, gilt sofort ----
+    $('m-cal-mode').value = 'manual'; $('m-cal-mode').dispatchEvent(new Event('change', { bubbles: true }));
+    check('Ausgleichswert von Hand: Beschriftung "Ausgleichswert (dB)", Knopf "Übernehmen", Vorgabe 100', /Ausgleichswert \(dB\)/.test($('m-ref-label').textContent) && /^Übernehmen$/.test($('m-cal').textContent) && $('m-ref').value === '100', $('m-ref-label').textContent + ' / ' + $('m-cal').textContent + ' / ' + $('m-ref').value);
+    $('m-ref').value = '117.5'; $('m-ref').dispatchEvent(new Event('change', { bubbles: true })); $('m-cal').click(); await sleep(700);
+    const man = Object.values(JSON.parse(localStorage.getItem('x32.measure.cal') || '{}'))[0];
+    check('Ausgleichswert 117,5 dB übernommen: gespeichert, Anzeige = -23,0 + 117,5 = 94,5 dB(A), Badge "kalibriert"', man === 117.5 && near(num('m-value'), 94.5, 0.7) && /^kalibriert/.test($('m-cal-badge').textContent) && /Ausgleichswert \+117\.5 dB übernommen/.test($('m-notice').textContent), 'gespeichert ' + man + ', angezeigt ' + $('m-value').textContent);
+    check('Info nennt "von Hand eingetragen" und die Aussteuerung (0 dBFS entsprechen 118 dB)', /von Hand eingetragen/.test($('m-cal-info').textContent) && /0 dBFS entsprechen 118 dB/.test($('m-cal-range').textContent), $('m-cal-info').textContent.slice(0, 90));
+    $('m-ref').value = '5'; $('m-ref').dispatchEvent(new Event('change', { bubbles: true }));
+    check('Unsinniger Ausgleichswert (5 dB) wird auf den erlaubten Bereich begrenzt (40 ... 200)', $('m-ref').value === '40', $('m-ref').value);
+    $('m-cal-mode').value = 'tone'; $('m-cal-mode').dispatchEvent(new Event('change', { bubbles: true }));
+    $('m-cal-reset').click(); await sleep(200);
 
     // ---- REW-Knopf hält die Messung an ----
     document.getElementById('rew-btn').click(); await sleep(300);

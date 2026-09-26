@@ -11,7 +11,7 @@
 //   ?wav=bursts  bursts.wav: 1 s Rauschen, 1 s fast Stille (wie Musik mit Pausen)
 //   ?wav=loud    loud.wav:   stark übersteuertes Rauschen (Spitzen bei 0 dBFS)
 // Geprüft wird: ruhige Zahlenanzeige, Bewertung/Festhalten, Kalibrator-Prüfung (Rauschen wird abgelehnt), Kalibrieren mit Referenzgerät,
-// Mikrofon-Kalibrierdatei (laden, wirkt, speichern, entfernen). Läuft in Echtzeit; Server auf Port 8811 hält die Seite offen.
+// Läuft in Echtzeit; Server auf Port 8811 hält die Seite offen.
 window.__calls = [];
 window.x32API = {
   micStatus: async () => 'granted', micRequest: async () => 'granted', openMicSettings: async () => true,
@@ -106,47 +106,7 @@ function noiseGainDb(fn, fs){ let s = 0, n = 0; for(let f = 20; f < fs / 2; f +=
       check('Referenz-Kalibrierung: Offset = 72 - A-Pegel des Rauschens (' + offA.toFixed(1) + ' dB)', done && typeof got === 'number' && near(got, offA, 1.0), 'gespeichert ' + got);
       check('Danach: Anzeige 72 dB(A), Badge "kalibriert", Meldung "mit Referenzgerät", Info nennt Datum und Referenz', near(num('m-value'), 72, 1.2) && /dB\(A\)/.test($('m-unit').textContent) && /^kalibriert/.test($('m-cal-badge').textContent) && /mit Referenzgerät/.test($('m-notice').textContent) && /mit Referenzgerät, 72 dB\(A\)/.test($('m-cal-info').textContent), $('m-value').textContent + ' | ' + $('m-notice').textContent.slice(0, 90) + ' | ' + $('m-cal-info').textContent.slice(0, 120));
       check('Unkalibriert-Hinweis ist weg', $('m-relhint').hidden);
-      const calNow = Measure.debug().cals; const keyNow = Object.keys(calNow)[0];
 
-      // ---- Mikrofon-Kalibrierdatei ----
-      check('Ohne Datei: "Keine Datei geladen", Entfernen/Speichern gesperrt, keine Kurve', /Keine Datei/.test($('m-corr-info').textContent) && $('m-corr-remove').disabled && $('m-corr-save').disabled && $('m-corr-plot').hidden);
-      change('m-weight', 'Z'); await sleep(300);
-      const zLeq = async () => { Measure.debug().S.meter.resetHold(); await sleep(4000); return Measure.debug().S.meter.snapshot().w.Z.leq; };
-      const before = await zLeq();
-      const bp = new Float64Array(31); for(let i = 0; i < 10; i++){ const q = Measure.debug().S.spectrum.bandPowers(); if(q) q.forEach((v, k) => { bp[k] += v / 10; }); await sleep(100); }
-      const file = '* Test-Mikrofon\n20 0\n1000 0\n2000 -6\n20000 -6\n';       // Mikrofon zeigt ab 2 kHz 6 dB zu wenig -> Ausgleich hebt um 6 dB
-      const r = Measure.loadCorrection(file, 'Test');
-      check('Datei laden: angenommen, 4 Punkte, Messung läuft weiter', r.ok && r.count === 4 && st().running, JSON.stringify(r));
-      check('Nach dem Laden: Info nennt Namen, Punkte, größte Abweichung; Kurve sichtbar; Entfernen/Speichern frei', /„Test“: 4 Punkte/.test($('m-corr-info').textContent) && /−6,0 dB bei 2,0 kHz/.test($('m-corr-info').textContent) && !$('m-corr-plot').hidden && !$('m-corr-remove').disabled && !$('m-corr-save').disabled, $('m-corr-info').textContent);
-      await until(() => seconds() >= 1.5, 8000);
-      // Erwartung aus dem echten Spektrum vor dem Laden: Leistung je Terzband mal Ausgleich der Datei bei der Bandmitte (unabhängig vom Filter)
-      const pts = X32SPL.parseMicCal(file).points, ref1k = X32SPL.micCalDb(pts, 1000);
-      let sum0 = 0, sum1 = 0; bp.forEach((v, k) => { sum0 += v; sum1 += v * Math.pow(10, -(X32SPL.micCalDb(pts, X32SPL.THIRD_OCTAVE_CENTERS[k]) - ref1k) / 10); });
-      const after = await zLeq(), exp = 10 * Math.log10(sum1 / sum0);
-      check('Die Datei wirkt auf die Messung: unbewerteter Pegel des Rauschens steigt um ' + exp.toFixed(1) + ' dB (Ausgleich +6 dB über 2 kHz, Rechnung aus dem echten Spektrum)', near(after - before, exp, 0.6), 'vorher ' + before.toFixed(2) + ', nachher ' + after.toFixed(2) + ', Differenz ' + (after - before).toFixed(2));
-      check('Datei bleibt gespeichert (für Eingang und Kanal) und überlebt die Kalibrierung', !!localStorage.getItem('x32.measure.corr') && keyNow === Object.keys(Measure.debug().corrs)[0], Object.keys(Measure.debug().corrs).join());
-      // Speichern und wieder einlesen
-      $('m-corr-save').click(); await sleep(200);
-      const sv = window.__saved;
-      check('Speichern: Datei "Mikrofon-Kalibrierung_Test.txt", wieder lesbar mit denselben Punkten', sv && sv.name === 'Mikrofon-Kalibrierung_Test.txt' && (() => { const q = X32SPL.parseMicCal(sv.text); return q.ok && q.points.length === 4 && q.points[2][0] === 2000 && q.points[2][1] === -6; })(), sv && sv.name + ' ' + JSON.stringify(sv.text.split('\n').slice(0, 4)));
-      // Ungültige Datei ändert nichts
-      const bad = Measure.loadCorrection('hallo welt', 'Kaputt');
-      check('Ungültige Datei: abgelehnt mit Meldung, die geladene Kurve bleibt', !bad.ok && /Zeilen/.test(bad.error) && /„Test“/.test($('m-corr-info').textContent) && window.__toasts.some((t) => /^! .*nicht brauchbar/.test(t)), JSON.stringify(bad).slice(0, 100));
-      // Bearbeiten im Editor
-      $('m-corr-edit').click();
-      check('Werte eingeben: Editor öffnet sich mit den aktuellen Werten', !$('m-corr-editor').hidden && /2000/.test($('m-corr-text').value), $('m-corr-text').value.split('\n').slice(0, 3).join(' | '));
-      $('m-corr-text').value = '20;0\n1000;0\n4000;3,0\n20000;3,0'; $('m-corr-apply').click(); await sleep(200);
-      check('Übernehmen: neue Werte gelten, Editor schließt sich', /„Test“: 4 Punkte/.test($('m-corr-info').textContent) && /\+3,0 dB bei 4,0 kHz/.test($('m-corr-info').textContent) && $('m-corr-editor').hidden, $('m-corr-info').textContent.slice(0, 120));
-      // Datei über die Dateiauswahl
-      const dt = new DataTransfer(); dt.items.add(new File(['20 -1\n100 0\n1000 0\n8000 2\n20000 -2\n'], 'ECM8000-Allgemein.txt', { type: 'text/plain' }));
-      $('m-corr-file').files = dt.files; $('m-corr-file').dispatchEvent(new Event('change', { bubbles: true }));
-      await until(() => /ECM8000-Allgemein/.test($('m-corr-info').textContent), 3000);
-      check('Datei über die Dateiauswahl: Name ohne Endung, 5 Punkte', /„ECM8000-Allgemein“: 5 Punkte/.test($('m-corr-info').textContent), $('m-corr-info').textContent.slice(0, 100));
-      // Entfernen
-      $('m-corr-remove').click(); await until(() => seconds() >= 1.5, 8000);
-      const removed = await zLeq();
-      check('Entfernen: wieder "Keine Datei", Pegel wie vorher (±0,3 dB)', /Keine Datei/.test($('m-corr-info').textContent) && $('m-corr-plot').hidden && near(removed, before, 0.3) && !localStorage.getItem('x32.measure.corr').includes('points'), 'vorher ' + before.toFixed(2) + ', jetzt ' + removed.toFixed(2));
-      check('Die Pegel-Kalibrierung bleibt beim Wechsel der Datei erhalten (72 dB(A))', /^kalibriert/.test($('m-cal-badge').textContent) && Object.values(Measure.debug().cals)[0] === got);
     }
 
     if(WAV === 'loud'){
@@ -163,9 +123,8 @@ function noiseGainDb(fn, fs){ let s = 0, n = 0; for(let f = 20; f < fs / 2; f +=
       await until(() => !st().calibrating, 15000); await sleep(300);
       check('Rauschen mit Pausen als Kalibrator: ebenfalls abgelehnt (kein Ton oder schwankt)', /kein reiner Ton|schwankt/.test($('m-notice').textContent) && !localStorage.getItem('x32.measure.cal'), $('m-notice').textContent.slice(0, 200));
     }
-    if(params.get('shot')){                                    // Bildschirmfoto: Messung läuft weiter, Referenz-Kalibrierung und Datei geladen
+    if(params.get('shot')){                                    // Bildschirmfoto: Messung läuft weiter, Referenz-Kalibrierung
       if(!st().running) await Measure.start();
-      Measure.loadCorrection('* ECM8000 (Beispielwerte)\n20 -1.5\n50 -0.5\n100 0\n500 0.2\n1000 0\n2000 0.5\n4000 1.2\n8000 2.5\n12000 3.8\n16000 2.0\n20000 -1.5\n', 'ECM8000 Beispiel');
       if($('m-settings').hidden) $('m-gear').click();
       await sleep(2500);
     } else Measure.stop();
