@@ -20,6 +20,7 @@
   $('#ip-input').value = '10.255.255.1'; $('#connect-btn').click();
   await sleep(1500); R.waitText = $('#status-text').textContent; R.waitTitle = $('#cp-title').textContent;
   await sleep(9500);
+  t0 = Date.now(); while (Date.now() - t0 < 6000 && !/verschiedenen/.test($('#cp-text').textContent)) await sleep(200);        // Windows braucht für Ping/Route etwas länger als macOS
   R.noReplyText = $('#status-text').textContent; R.bannerTitle = $('#cp-title').textContent; R.bannerText = $('#cp-text').textContent; R.waiting = $('#console').classList.contains('waiting'); R.badgeBad = $('#status-badge').classList.contains('bad');
   // 3) Verbindungshilfe mit echter Ursachensuche
   ConnectHelp.open('10.255.255.1');
