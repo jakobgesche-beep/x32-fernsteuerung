@@ -7,7 +7,10 @@ const dgram = require("dgram");
 const { EventEmitter } = require("events");
 const OSC = require("../shared/osc");
 const Net = require("../shared/netdiag");
-const X32Connection = require("../shared/connection");
+const Sys = require("../shared/sysnet");
+const BaseConnection = require("../shared/connection");
+// Die Tests laufen (wenn nichts anderes angegeben ist) mit den Befehlen von macOS, auch auf Windows-Rechnern; Windows-Tests geben platform: "win32" an
+class X32Connection extends BaseConnection { constructor(o) { super(Object.assign({ platform: "darwin" }, o)); } }
 const MockX32 = require("./mock-console");
 
 const out = []; let fails = 0;
@@ -210,6 +213,65 @@ const IF_HOME = { en0: [{ address: "192.168.178.81", netmask: "255.255.255.0", f
     check("Terminal-Vergleichstest ohne Antwort: „keine Antwort“", r2.ok && r2.replied === false);
     const r3 = await conn.terminalTest("abc");
     check("Terminal-Vergleichstest mit ungültiger Adresse: Fehlermeldung, kein Terminal geöffnet", !r3.ok && /keine gültige IP/.test(r3.error)); }
+
+  // =============== F. Windows: Befehle und Ausgaben (echte Ausgaben von Windows Server 2025, englisch, plus deutsche Form) ===============
+  const WIN_ROUTE_EN = [
+    "===========================================================================", "Interface List", " 14...00 0d 3a 3b 36 2a ......Microsoft Hyper-V Network Adapter #3", "===========================================================================", "",
+    "IPv4 Route Table", "===========================================================================", "Active Routes:", "Network Destination        Netmask          Gateway       Interface  Metric",
+    "          0.0.0.0          0.0.0.0         10.1.0.1       10.1.0.108     11", "         10.1.0.0    255.255.240.0         On-link        10.1.0.108    266", "       10.1.0.108  255.255.255.255         On-link        10.1.0.108    266",
+    "       10.1.15.255  255.255.255.255         On-link        10.1.0.108    266", "         127.0.0.0        255.0.0.0         On-link         127.0.0.1    331", "     172.26.208.0    255.255.240.0         On-link      172.26.208.1   5256",
+    "         224.0.0.0        240.0.0.0         On-link         127.0.0.1    331", "   255.255.255.255  255.255.255.255         On-link        10.1.0.108    266", "===========================================================================", "Persistent Routes:", "  None"].join("\r\n");
+  const WIN_ROUTE_DE = [
+    "IPv4-Routentabelle", "Aktive Routen:", "  Netzwerkziel    Netzwerkmaske          Gateway   Schnittstelle Metrik",
+    "          0.0.0.0          0.0.0.0    192.168.178.1  192.168.178.44     25", "          0.0.0.0          0.0.0.0    192.168.178.1  192.168.178.50     45", "    192.168.178.0    255.255.255.0   Auf Verbindung   192.168.178.44    281",
+    "  192.168.178.44  255.255.255.255   Auf Verbindung   192.168.178.44    281", "  192.168.178.255  255.255.255.255   Auf Verbindung   192.168.178.44    281", "        224.0.0.0        240.0.0.0   Auf Verbindung   192.168.178.44    281", "Ständige Routen:", "  Keine"].join("\r\n");
+  { const en = Sys.parseRoutePrint(WIN_ROUTE_EN), de = Sys.parseRoutePrint(WIN_ROUTE_DE);
+    check("Windows „route print“ (englisch): 8 Zeilen erkannt, Standard-Gateway 10.1.0.1, „On-link“ = kein Gateway", en.length === 8 && Sys.defaultGatewayFromRoutes(en) === "10.1.0.1" && en.find((r) => r.dest === "10.1.0.0").gateway === null, en.length + " Zeilen");
+    check("Windows „route print“ (deutsch, „Auf Verbindung“): Standard-Gateway mit kleinster Metrik (192.168.178.1 über .44), Netz als „im selben Netz“ erkannt", de.length === 6 && Sys.defaultGatewayFromRoutes(de) === "192.168.178.1" && Sys.bestRoute(de, "192.168.178.60").onLink === true && Sys.bestRoute(de, "192.168.178.60").interface === "192.168.178.44", JSON.stringify(Sys.bestRoute(de, "192.168.178.60")));
+    check("Beste Route: Adresse in einem anderen Netz geht über den Router; Rundruf-/Multicast-Zeilen zählen nicht", (() => { const r = Sys.bestRoute(en, "10.255.255.1"); return r.gateway === "10.1.0.1" && r.onLink === false && Sys.bestRoute(en, "10.1.5.5").onLink === true; })());
+    check("Leere oder unbrauchbare Ausgabe: keine Zeilen, kein Gateway, keine Route, kein Absturz", Sys.parseRoutePrint("").length === 0 && Sys.parseRoutePrint(null).length === 0 && Sys.defaultGatewayFromRoutes([]) === null && Sys.bestRoute([], "1.2.3.4") === null); }
+  const PING_EN_OK = "\r\nPinging 10.1.0.1 with 32 bytes of data:\r\nReply from 10.1.0.1: bytes=32 time=2ms TTL=64\r\nReply from 10.1.0.1: bytes=32 time<1ms TTL=64\r\nReply from 10.1.0.1: bytes=32 time=1ms TTL=64\r\n\r\nPing statistics for 10.1.0.1:\r\n    Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),\r\nApproximate round trip times in milli-seconds:\r\n    Minimum = 0ms, Maximum = 2ms, Average = 1ms\r\n";
+  const PING_DE_TIMEOUT = "\r\nPing wird ausgeführt für 192.168.178.60 mit 32 Bytes Daten:\r\nZeitüberschreitung der Anforderung.\r\nZeitüberschreitung der Anforderung.\r\nZeitüberschreitung der Anforderung.\r\n\r\nPing-Statistik für 192.168.178.60:\r\n    Pakete: Gesendet = 3, Empfangen = 0, Verloren = 3\r\n    (100% Verlust),\r\n";
+  const PING_DE_UNREACH = "\r\nPing wird ausgeführt für 192.168.178.60 mit 32 Bytes Daten:\r\nAntwort von 192.168.178.44: Zielhost nicht erreichbar.\r\nAntwort von 192.168.178.44: Zielhost nicht erreichbar.\r\nAntwort von 192.168.178.44: Zielhost nicht erreichbar.\r\n\r\nPing-Statistik für 192.168.178.60:\r\n    Pakete: Gesendet = 3, Empfangen = 3, Verloren = 0\r\n    (0% Verlust),\r\n";
+  const PING_DE_OK = "\r\nPing wird ausgeführt für 192.168.178.1 mit 32 Bytes Daten:\r\nAntwort von 192.168.178.1: Bytes=32 Zeit=3ms TTL=64\r\nAntwort von 192.168.178.1: Bytes=32 Zeit<1ms TTL=64\r\nAntwort von 192.168.178.1: Bytes=32 Zeit=2ms TTL=64\r\n\r\nPing-Statistik für 192.168.178.1:\r\n    Pakete: Gesendet = 3, Empfangen = 3, Verloren = 0\r\n    (0% Verlust),\r\nCa. Zeitangaben in Millisek.:\r\n    Minimum = 0ms, Maximum = 3ms, Mittelwert = 1ms\r\n";
+  { const a = Sys.parsePingWin(PING_EN_OK, 3), b = Sys.parsePingWin(PING_DE_OK, 3), c = Sys.parsePingWin(PING_DE_TIMEOUT, 3), d = Sys.parsePingWin(PING_DE_UNREACH, 3);
+    check("Windows-Ping (englisch, drei Antworten): erreichbar, kein Verlust, Zeit etwa 1 ms (nur Antwortzeilen zählen, nicht „Minimum/Maximum“)", a.ok === true && a.lossPct === 0 && Math.abs(a.rtt - 1) < 1, JSON.stringify(a));
+    check("Windows-Ping (deutsch: „Zeit=“, „Zeit<1ms“): erreichbar", b.ok === true && b.lossPct === 0 && Math.abs(b.rtt - 1.7) < 1, JSON.stringify(b));
+    check("Windows-Ping: „Zeitüberschreitung“ = nicht erreichbar, 100 % Verlust", c.ok === false && c.lossPct === 100, JSON.stringify(c));
+    check("Windows-Ping: „Zielhost nicht erreichbar“ vom eigenen Rechner zählt NICHT als Antwort (Windows zählt es sonst als „Empfangen“)", d.ok === false && d.lossPct === 100, JSON.stringify(d));
+    check("Windows-Ping ohne verwertbare Ausgabe (Befehl fehlt/leer): nicht messbar statt falsch", Sys.parsePingWin("", 3).ok === null && Sys.parsePingWin("Bad command", 3).ok === null); }
+  { const en = "\r\nInterface: 10.1.0.108 --- 0xe\r\n  Internet Address      Physical Address      Type\r\n  10.1.0.1              12-34-56-78-9a-bc     dynamic   \r\n", de = "\r\nSchnittstelle: 192.168.178.44 --- 0xb\r\n  Internetadresse       Physische Adresse     Typ\r\n  192.168.178.60        00-1D-C1-AA-BB-CC     dynamisch\r\n";
+    check("Windows-ARP (englisch und deutsch): MAC-Adresse wird gefunden und mit Doppelpunkten geschrieben", Sys.parseArpWin(en, "10.1.0.1").mac === "12:34:56:78:9a:bc" && Sys.parseArpWin(de, "192.168.178.60").mac === "00:1d:c1:aa:bb:cc");
+    check("Windows-ARP: kein Eintrag („Es wurden keine ARP-Einträge gefunden“), falsche Adresse, Rundruf-MAC -> keine MAC", Sys.parseArpWin("Es wurden keine ARP-Einträge gefunden.\r\n", "10.1.0.1").mac === null && Sys.parseArpWin(en, "10.1.0.2").mac === null && Sys.parseArpWin("  10.1.0.1   ff-ff-ff-ff-ff-ff   static\r\n", "10.1.0.1").mac === null); }
+  { const cmds = [], run = async (cmd, args) => { cmds.push(cmd + " " + args.join(" ")); return { out: /^route/.test(cmd) ? WIN_ROUTE_DE : /^ping/.test(cmd) ? PING_DE_OK : "  192.168.178.1  aa-bb-cc-dd-ee-ff  dynamisch\r\n", err: null, errOut: "" }; };
+    const t = Sys.tools("win32", run), gw = await t.defaultGateway(), rt = await t.routeTo("192.168.178.60"), pg = await t.ping("192.168.178.1"), ar = await t.arp("192.168.178.1");
+    check("Windows-Werkzeuge: rufen route/ping/arp ohne Pfad und mit Windows-Schaltern auf (-n 3, -w 1000, -a) und werten aus", gw === "192.168.178.1" && rt.onLink === true && pg.ok === true && ar.mac === "aa:bb:cc:dd:ee:ff" && cmds.includes("route print -4") && cmds.includes("ping -n 3 -w 1000 192.168.178.1") && cmds.includes("arp -a 192.168.178.1"), cmds.join(" | "));
+    const m = [], runMac = async (cmd, args) => { m.push(cmd + " " + args.join(" ")); return { out: "", err: null, errOut: "" }; }; const tm = Sys.tools("darwin", runMac); await tm.defaultGateway(); await tm.ping("1.2.3.4");
+    check("macOS-Werkzeuge: /sbin/route, /sbin/ping -c 3, unverändert", m.includes("/sbin/route -n get default") && m.some((x) => /^\/sbin\/ping -c 3 -W 1000 -t 5 1\.2\.3\.4$/.test(x)), m.join(" | ")); }
+  // Verbindung unter Windows: Wörter, keine macOS-Sperre, kein Terminal-Test, Ursachensuche mit den Windows-Befehlen
+  { const IF_WIN = { "Ethernet": [{ address: "192.168.178.44", netmask: "255.255.255.0", family: "IPv4", mac: "aa:bb", internal: false }] };
+    const mkWin = (o) => (cmd, args, opt, cb) => { if (opt && opt.windowsHide !== true) o.noHide = true; if (/^route/.test(cmd)) return cb(null, WIN_ROUTE_DE, ""); if (/^ping/.test(cmd)) return cb(null, o.pingOk ? PING_DE_OK : PING_DE_TIMEOUT, ""); if (/^arp/.test(cmd)) return cb(null, o.pingOk ? "  192.168.178.60  00-1d-c1-aa-bb-cc  dynamisch\r\n" : "Es wurden keine ARP-Einträge gefunden.\r\n", ""); cb(new Error("unbekannt"), "", ""); };
+    const winScenario = async (name, want, o) => {
+      const net = new FakeNet((pkt) => { if (pkt.to.port === 5353) return o.mdns ? { replies: [1, 2, 3].map((i) => ({ data: Buffer.from("mdns"), from: { address: "192.168.178." + (20 + i), port: 5353 } })) } : {}; if (pkt.to.port === 10023) return o.console ? consoleReplies("192.168.178.60", pkt) : {}; return {}; });
+      const conn = new BaseConnection({ platform: "win32", dgram: net, os: osFake(IF_WIN), execFile: mkWin(o), tmpDir: tmp }), d = await conn.diagnose("192.168.178.60", {});
+      check("Ursachensuche unter Windows: " + name + " -> " + want, d.verdict.id === want, "war: " + d.verdict.id + " | " + d.checks.map((c) => c.id + ":" + c.level).join(" "));
+      return { d, conn };
+    };
+    await winScenario("Pult da und antwortet", "ok", { pingOk: true, mdns: true, console: true });
+    await winScenario("Pult schweigt, Ping ok, andere Geräte antworten", "silent-osc", { pingOk: true, mdns: true });
+    const w = await winScenario("Ping ok, aber es kommt gar nichts zurück (Firewall)", "maybe-blocked", { pingOk: true, mdns: false });
+    check("   Windows-Urteil nennt die Windows-Firewall (nicht macOS), Schritte mit „Zugriff zulassen“, Knopf „Firewall-Einstellungen öffnen“, keinen Terminal-Test und keinen Notlösungs-Befehl", /Windows-Firewall/.test(w.d.verdict.text) && !/macOS|Terminal/.test(w.d.verdict.text + w.d.verdict.steps.join(" ")) && w.d.verdict.steps.some((x) => /Zugriff zulassen/.test(x)) && w.d.verdict.actions.some((a) => a.id === "open-firewall") && !w.d.verdict.actions.some((a) => /terminal|command|privacy/.test(a.id)) && w.d.info.command === null, JSON.stringify(w.d.verdict.actions));
+    await winScenario("Pult nicht erreichbar (kein Ping)", "unreachable", { pingOk: false, mdns: true });
+    const w2 = await winScenario("Kein Ping, niemand antwortet", "unreachable", { pingOk: false, mdns: false });
+    check("   Prüfpunkte unter Windows sprechen vom „Computer“ und haben keinen macOS-Punkt („Zugriff der App aufs lokale Netzwerk“)", w2.d.checks.some((c) => /Netzwerk des Computers/.test(c.title)) && w2.d.checks.some((c) => c.title === "Gleiches Netz wie der Computer") && !w2.d.checks.some((c) => /aufs lokale Netzwerk|Terminal/.test(c.title)), w2.d.checks.map((c) => c.title).join(" | "));
+    { const net = new FakeNet(() => ({})), conn = new BaseConnection({ platform: "win32", dgram: net, os: osFake(IF_WIN), execFile: mkWin({ pingOk: false }), tmpDir: tmp }), d = await conn.diagnose("192.168.0.64", {});
+      check("Urteil unter Windows: falsches Netz -> „Computer und Pult sind in verschiedenen Netzen“, Schritte sprechen vom Computer", d.verdict.id === "subnet" && /^Computer und Pult/.test(d.verdict.title) && !/Mac/.test(d.verdict.text + d.verdict.steps.join(" ")), d.verdict.title); }
+    const conn = new BaseConnection({ platform: "win32", dgram: new FakeNet(() => ({})), os: osFake(IF_WIN), execFile: mkWin({}), tmpDir: tmp }), acc = await conn.wakeLocalNetwork(), tt = await conn.terminalTest("192.168.178.60");
+    check("Windows: keine macOS-Zugriffssperre (nie „blocked“), kein Netz-Test beim Start; Terminal-Vergleichstest gibt es nur auf dem Mac", acc.blocked === false && !tt.ok && /nur auf dem Mac/.test(tt.error), JSON.stringify(acc));
+    const opts = []; const c2 = new BaseConnection({ platform: "win32", dgram: new FakeNet(() => ({})), os: osFake(IF_WIN), execFile: (cmd, args, o, cb) => { opts.push(o); cb(null, "", ""); }, tmpDir: tmp }); await c2.ping("192.168.178.1");
+    check("Programme werden ohne sichtbares Konsolenfenster gestartet (windowsHide: true, sonst blitzen unter Windows schwarze Fenster auf)", opts.length > 0 && opts.every((o) => o.windowsHide === true), JSON.stringify(opts)); }
+  { const v = Net.diagnose({ ip: "192.168.178.60", platform: "win32", ifaces: Net.interfaces(osFake({ Ethernet: [{ address: "192.168.178.44", netmask: "255.255.255.0", family: "IPv4", internal: false }] })), probes: { ping: { ok: true }, udp: { reply: null, sent: 10, sendErrors: {} }, mdns: { replies: 0, devices: 0 } } }).verdict;
+    check("Windows-Urteile bleiben in einfachem Deutsch, jeder Schritt ist ein Satz mit mindestens 20 Zeichen", v.steps.length >= 4 && v.steps.every((x) => x.length >= 20)); }
 
   server.close(); mock.shutdown();
   out.push(fails ? "==> " + fails + " FEHLER" : "==> alle Tests bestanden");

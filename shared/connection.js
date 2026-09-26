@@ -6,17 +6,20 @@ const path = require("path");
 const OSC = require("./osc");
 const X32Client = require("./client");
 const Net = require("./netdiag");
+const Sys = require("./sysnet");
 
 const PORT = 10023;
 const LOG_KEEP = 500;                // Zeilen im Speicher
 const LOG_FILE_MAX = 300 * 1024;     // danach wird die Datei umbenannt (.1.log)
 
 class X32Connection {
-  // opts: dgram, os, execFile, logFile, tmpDir, port, noReplyMs, handlers { status, batch, meter, log }, appName
+  // opts: dgram, os, execFile, platform ("darwin" | "win32"), logFile, tmpDir, port, noReplyMs, handlers { status, batch, meter, log }, appName
   constructor(opts) {
     this.dgram = opts.dgram || require("dgram");
     this.os = opts.os || require("os");
     this.execFile = opts.execFile || require("child_process").execFile;
+    this.platform = opts.platform || process.platform;
+    this.sys = Sys.tools(this.platform, (c, a, t) => this.run(c, a, t));
     this.logFile = opts.logFile || null;
     this.tmpDir = opts.tmpDir || require("os").tmpdir();
     this.port = opts.port || PORT;
@@ -29,6 +32,8 @@ class X32Connection {
     this.autoDiagDone = false; this.lastDiag = null; this.netAccess = null;
     this.connectId = 0;
   }
+
+  mac() { return this.platform === "darwin"; }
 
   // ---------- Protokoll ----------
   log(msg) {
@@ -54,8 +59,8 @@ class X32Connection {
     const ip = chk.ip, id = ++this.connectId, ifaces = Net.interfaces(this.os);
     this.target = ip; this.rx = 0; this.sent = 0; this.sendErrors = {}; this.autoDiagDone = false; this.lastDiag = null; this.stateSince = this.now(); this.lastState = "connecting";
     this.log("=== Verbinden mit " + ip + ":" + this.port + " ===");
-    this.log("Netzwerke des Macs: " + (ifaces.length ? ifaces.map((f) => f.name + " " + f.address + "/" + f.prefix).join(", ") : "keine (kein aktives Netzwerk!)"));
-    if (!chk.loopback && !Net.ifaceFor(ip, ifaces)) this.log("WARNUNG: " + ip + " liegt in keinem Netz des Macs. Die Pakete gehen über den Router und erreichen das Pult wahrscheinlich nie.");
+    this.log("Netzwerke " + (this.mac() ? "des Macs" : "des Computers") + ": " + (ifaces.length ? ifaces.map((f) => f.name + " " + f.address + "/" + f.prefix).join(", ") : "keine (kein aktives Netzwerk!)"));
+    if (!chk.loopback && !Net.ifaceFor(ip, ifaces)) this.log("WARNUNG: " + ip + " liegt in keinem Netz " + (this.mac() ? "des Macs" : "des Computers") + ". Die Pakete gehen über den Router und erreichen das Pult wahrscheinlich nie.");
     return new Promise((resolve) => {
       let ready = false;
       const sock = this.dgram.createSocket("udp4");
@@ -184,23 +189,14 @@ class X32Connection {
   // ---------- Messungen für die Fehlersuche ----------
   run(cmd, args, timeout) {
     return new Promise((resolve) => {
-      try { this.execFile(cmd, args, { timeout: timeout || 8000 }, (err, stdout, stderr) => resolve({ err, out: String(stdout || ""), errOut: String(stderr || "") })); }
+      try { this.execFile(cmd, args, { timeout: timeout || 8000, windowsHide: true }, (err, stdout, stderr) => resolve({ err, out: String(stdout || ""), errOut: String(stderr || "") })); }
       catch (e) { resolve({ err: e, out: "", errOut: "" }); }
     });
   }
-  async defaultGateway() { const r = await this.run("/sbin/route", ["-n", "get", "default"], 3000); const m = /gateway:\s*([\d.]+)/.exec(r.out); return m ? m[1] : null; }
-  async routeTo(ip) {
-    const r = await this.run("/sbin/route", ["-n", "get", ip], 3000), g = /gateway:\s*([\d.]+)/.exec(r.out), i = /interface:\s*(\S+)/.exec(r.out);
-    return r.out ? { gateway: g ? g[1] : null, interface: i ? i[1] : null, onLink: !g } : null;
-  }
-  async ping(ip) {
-    const r = await this.run("/sbin/ping", ["-c", "3", "-W", "1000", "-t", "5", ip], 9000);
-    const rec = /(\d+)\s+packets received/.exec(r.out), tx = /(\d+)\s+packets transmitted/.exec(r.out);
-    if (!tx) return { ok: null };
-    const loss = /([\d.]+)%\s+packet loss/.exec(r.out), rtt = /=\s*[\d.]+\/([\d.]+)\//.exec(r.out);
-    return { ok: !!rec && parseInt(rec[1], 10) > 0, lossPct: loss ? parseFloat(loss[1]) : null, rtt: rtt ? parseFloat(rtt[1]) : null };
-  }
-  async arp(ip) { const r = await this.run("/usr/sbin/arp", ["-n", ip], 3000), m = /at\s+((?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2})/i.exec(r.out); return { mac: m ? m[1] : null }; }
+  defaultGateway() { return this.sys.defaultGateway(); }
+  routeTo(ip) { return this.sys.routeTo(ip); }
+  ping(ip) { return this.sys.ping(ip); }
+  arp(ip) { return this.sys.arp(ip); }
   udpProbe(ip) {
     return new Promise((resolve) => {
       const s = this.dgram.createSocket("udp4"), res = { reply: null, sent: 0, sendErrors: {} }, t0 = this.now(), msgs = [OSC.encodeMessage("/info", []), OSC.encodeMessage("/xinfo", [])];
@@ -251,6 +247,10 @@ class X32Connection {
   // Darf die App ins lokale Netz? Ein Rundruf (Multicast) scheitert mit EHOSTUNREACH & Co., wenn macOS den Zugriff verweigert (so im Versuch nachgestellt).
   // Einzelne Pakete an Geräte werden dagegen ohne Fehler still verworfen; deshalb taugt nur dieser Test als Nachweis.
   async checkLocalNetwork() {
+    if (!this.mac()) {                                                            // nur macOS sperrt Programme vom lokalen Netz; Windows fragt beim ersten Start selbst (Firewall)
+      this.netAccess = { blocked: false, error: null, replies: 0, devices: 0, noNetwork: Net.interfaces(this.os).length === 0, at: this.now() };
+      return this.netAccess;
+    }
     const r = await this.mdnsProbe(), denied = ["EHOSTUNREACH", "EPERM", "EACCES", "EPIPE", "ENETUNREACH"], blocked = !!r.error && denied.includes(r.error), noNet = Net.interfaces(this.os).length === 0;
     this.netAccess = { blocked: blocked && !noNet, error: r.error || null, replies: r.replies || 0, devices: r.devices || 0, noNetwork: noNet, at: this.now() };
     this.log("Zugriff aufs lokale Netzwerk: " + (noNet ? "kein Netzwerk vorhanden" : blocked ? "VERWEIGERT von macOS (Fehler " + r.error + ")" : r.replies > 0 ? "erlaubt (" + r.devices + " Geräte haben geantwortet)" : "keine Sperre gemeldet (kein anderes Gerät hat geantwortet)"));
@@ -258,6 +258,7 @@ class X32Connection {
   }
   // Beim Start der App: kleine Anfrage an den Router (löst bei "noch nicht entschieden" die macOS-Abfrage aus) und Test, ob der Zugriff erlaubt ist
   async wakeLocalNetwork() {
+    if (!this.mac()) return this.checkLocalNetwork();
     const gw = await this.defaultGateway();
     if (gw) { const r = await this.gatewayProbe(gw); this.log("Start: kleine Anfrage an den Router " + gw + " gesendet: " + (r.ok ? "ok" : "Fehler " + r.error)); }
     else this.log("Start: kein Router gefunden (Netzwerk?)");
@@ -270,8 +271,8 @@ class X32Connection {
     this.log("--- Ursachensuche für " + (ipText || this.target || "(keine Adresse)") + " ---");
     const [gateway, route, ping, udp, mdns] = await Promise.all([this.defaultGateway(), ip ? this.routeTo(ip) : null, ip ? this.ping(ip) : null, ip ? this.udpProbe(ip) : null, this.mdnsProbe()]);
     const arp = ip ? await this.arp(ip) : null, gatewayUdp = gateway ? await this.gatewayProbe(gateway) : null;
-    const res = Net.diagnose({ ip: ipText || this.target || "", ifaces, gateway, route, probes: { ping, arp, udp, mdns, gatewayUdp }, terminal: opts.terminal || null });
-    res.info = { ifaces, gateway, route, command: Net.localNetworkCommand(ifaces, ip) };
+    const res = Net.diagnose({ ip: ipText || this.target || "", platform: this.platform, ifaces, gateway, route, probes: { ping, arp, udp, mdns, gatewayUdp }, terminal: opts.terminal || null });
+    res.info = { ifaces, gateway, route, command: this.mac() ? Net.localNetworkCommand(ifaces, ip) : null };
     this.lastDiag = res;
     res.checks.forEach((c) => this.log("  [" + c.level + "] " + c.title + ": " + c.detail));
     this.log("Ergebnis: " + res.verdict.id + " – " + res.verdict.title);
@@ -280,6 +281,7 @@ class X32Connection {
 
   // Vergleichstest: dieselbe Anfrage aus dem Terminal (dort erlaubt macOS den Netzwerkzugriff). Bekommt das Terminal Antwort, die App aber nicht: macOS blockiert die App.
   async terminalTest(ipText) {
+    if (!this.mac()) return { ok: false, error: "Diesen Vergleichstest gibt es nur auf dem Mac." };
     const chk = Net.checkTarget(ipText || this.target || "");
     if (!chk.ok) return { ok: false, error: chk.reason };
     const script = path.join(this.tmpDir, "x32-terminal-test.command"), out = path.join(this.tmpDir, "x32-terminal-test-result.txt");

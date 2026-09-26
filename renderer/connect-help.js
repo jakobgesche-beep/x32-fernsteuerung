@@ -3,12 +3,13 @@
 // - Fenster "Verbindungshilfe": Ursachensuche (Ping, Netz, Freigaben, Antwort des Pults), Schritte, Knöpfe, Prüfpunkte, Protokoll
 const ConnectHelp = (function () {
   const api = () => window.x32API;
+  const PLAT = window.X32PLAT || { isMac: true, pc: 'Mac', fileManager: 'Finder' };
   const SHORT = {
-    subnet: 'Mac und Pult scheinen in verschiedenen Netzen zu sein.',
+    subnet: PLAT.pc + ' und Pult scheinen in verschiedenen Netzen zu sein.',
     unreachable: 'Das Pult ist im Netz nicht erreichbar (aus? Kabel? andere Adresse?).',
-    'no-network': 'Der Mac ist mit keinem Netzwerk verbunden.',
+    'no-network': 'Der ' + PLAT.pc + ' ist mit keinem Netzwerk verbunden.',
     'blocked-error': 'macOS lässt die App nicht ins lokale Netzwerk.',
-    'maybe-blocked': 'Das Gerät ist erreichbar, aber es kommt nichts zurück. Wahrscheinlich blockiert macOS die App.',
+    'maybe-blocked': 'Das Gerät ist erreichbar, aber es kommt nichts zurück. Wahrscheinlich blockiert ' + (PLAT.isMac ? 'macOS' : 'die Windows-Firewall') + ' die App.',
     'app-blocked': 'macOS blockiert diese App im lokalen Netzwerk.',
     'silent-osc': 'Unter dieser Adresse ist ein Gerät, aber es antwortet nicht wie ein X32.',
     'bad-ip': 'Die IP-Adresse stimmt nicht.',
@@ -47,7 +48,7 @@ const ConnectHelp = (function () {
       (v.steps.length ? '<div class="section-title" style="margin-top:6px">Das kannst du tun</div><ol class="help-steps">' + v.steps.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ol>' : '') +
       '<div class="cp-actions" id="help-actions"></div><div id="help-extra"></div>' +
       '<details class="help-det"><summary>Prüfpunkte im Einzelnen</summary><div class="diag-grid" style="margin-top:8px">' + res.checks.map((c) => row((LEVEL[c.level] || c.level) + ' · ' + c.title, c.detail)).join('') + '</div></details>' +
-      '<details class="help-det" id="help-logbox"><summary>Protokoll (für Fehlersuche)</summary><pre class="help-log" id="help-log">Wird geladen …</pre><div class="cp-actions"><button class="btn small secondary" id="help-copy-log">Protokoll kopieren</button><button class="btn small secondary" id="help-open-log">Im Finder zeigen</button></div></details>';
+      '<details class="help-det" id="help-logbox"><summary>Protokoll (für Fehlersuche)</summary><pre class="help-log" id="help-log">Wird geladen …</pre><div class="cp-actions"><button class="btn small secondary" id="help-copy-log">Protokoll kopieren</button><button class="btn small secondary" id="help-open-log">Im ' + PLAT.fileManager + ' zeigen</button></div></details>';
     const actions = body.querySelector('#help-actions');
     v.actions.forEach((a, i) => {
       const b = el('<button class="btn small' + (i === 0 ? '' : ' secondary') + '" data-a="' + a.id + '">' + esc(a.label) + '</button>');
@@ -64,6 +65,7 @@ const ConnectHelp = (function () {
     const ip = overlay.querySelector('#help-ip').value.trim();
     if (id === 'retry') { close(); connectTo(ip); return; }
     if (id === 'open-privacy') { api().openPrivacy(); return; }
+    if (id === 'open-firewall') { api().openFirewall(); return; }
     if (id === 'scan') { close(); scanBtn.click(); return; }
     if (id === 'copy-command') {
       const cmd = lastRes && lastRes.info && lastRes.info.command;
@@ -91,7 +93,7 @@ const ConnectHelp = (function () {
   }
   async function run(ip, opts) {
     lastIp = ip;
-    setBusy(true, 'Prüfe Netzwerk, Pult und Freigaben … (etwa 4 Sekunden)');
+    setBusy(true, 'Prüfe Netzwerk, Pult und ' + (PLAT.isMac ? 'Freigaben' : 'Firewall') + ' … (etwa 4 Sekunden)');
     let res;
     try { res = await api().diagnose(ip, opts || {}); } catch (e) { setBusy(false); toast('Prüfung fehlgeschlagen: ' + e.message, true); return; }
     if (!overlay) return;

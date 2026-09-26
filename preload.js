@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 const on = (channel, cb) => ipcRenderer.on(channel, (event, ...args) => cb(...args));
 
 contextBridge.exposeInMainWorld("x32API", {
+  platform: process.platform,            // "darwin" (Mac) oder "win32" (Windows): die Oberfläche passt Wörter und Hilfen daran an
   // Verbindung
   scan: () => ipcRenderer.invoke("x32-scan"),
   diagnose: (ip, opts) => ipcRenderer.invoke("x32-diagnose", ip, opts),
@@ -12,6 +13,7 @@ contextBridge.exposeInMainWorld("x32API", {
   getLog: () => ipcRenderer.invoke("x32-get-log"),
   openLog: () => ipcRenderer.invoke("x32-open-log"),
   openPrivacy: () => ipcRenderer.invoke("x32-open-privacy"),
+  openFirewall: () => ipcRenderer.invoke("x32-open-firewall"),
   connect: (ip) => ipcRenderer.invoke("x32-connect", ip),
   disconnect: () => ipcRenderer.invoke("x32-disconnect"),
   snapshot: () => ipcRenderer.invoke("x32-snapshot"),

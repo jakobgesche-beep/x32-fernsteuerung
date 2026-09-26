@@ -114,7 +114,7 @@ async function runNetTest(){
   const verdict = good ? 'Sehr gut: Fader und Mute laufen praktisch verzögerungsfrei.'
     : ok ? 'Brauchbar: kleine Verzögerungen möglich. Näher an den Router gehen oder das 5-GHz-Netz nutzen hilft.'
     : 'Schlecht: Pakete gehen verloren oder kommen spät an. Kabel zum Router oder 5-GHz-WLAN in kurzer Entfernung nutzen.';
-  const tip = good ? '' : ' Tipp: AirDrop und Handoff am Mac ausschalten (können das WLAN alle paar Sekunden kurz stören) und andere Netzwerk-Programme schließen.';
+  const tip = good ? '' : (X32PLAT.isMac ? ' Tipp: AirDrop und Handoff am Mac ausschalten (können das WLAN alle paar Sekunden kurz stören) und andere Netzwerk-Programme schließen.' : ' Tipp: In den Energieoptionen den WLAN-Adapter nicht sparen lassen (Geräte-Manager → Netzwerkadapter → Energieverwaltung), und andere Netzwerk-Programme schließen.');
   out.innerHTML = '<div class="net-verdict ' + (good ? 'good' : ok ? 'mid' : 'bad') + '">' + esc(verdict + tip) + '</div>' +
     '<div class="diag-grid">' +
     diagRow('Einzelanfragen beantwortet', q.got + ' von ' + q.sent + ' (' + Math.round(q.lossPct) + ' % Verlust)') +
@@ -227,6 +227,7 @@ function showNetAccess(a){
 async function recheckNetAccess(force){ try { showNetAccess(await window.x32API.netAccess(!!force)); } catch(e){} }
 if(window.x32API.onNetAccess) window.x32API.onNetAccess(showNetAccess);
 window.addEventListener('focus', () => recheckNetAccess(true));
+document.querySelectorAll('.pc-name').forEach((e) => { e.textContent = X32PLAT.pc; });
 document.getElementById('nw-open').addEventListener('click', () => window.x32API.openPrivacy());
 document.getElementById('nw-help').addEventListener('click', () => ConnectHelp.open(ipInput.value.trim()));
 recheckNetAccess(false);
@@ -261,7 +262,7 @@ scanBtn.addEventListener('click', async () => {
     const results = scan.results || [];
     if(!results.length){
       const nets = (scan.ifaces || []).map((f) => f.network + '/' + f.prefix + ' (' + f.name + ')').join(', ');
-      toast(!(scan.ifaces || []).length ? 'Der Mac ist mit keinem Netzwerk verbunden (WLAN oder Kabel prüfen).' : 'Kein X32/M32 gefunden. Durchsucht: ' + nets + '. Pult an? Im selben Netz? Für Details auf „Verbindungshilfe“ drücken.', true);
+      toast(!(scan.ifaces || []).length ? 'Der ' + X32PLAT.pc + ' ist mit keinem Netzwerk verbunden (WLAN oder Kabel prüfen).' : 'Kein X32/M32 gefunden. Durchsucht: ' + nets + '. Pult an? Im selben Netz? Für Details auf „Verbindungshilfe“ drücken.', true);
       ConnectHelp.open(ipInput.value.trim());                       // nichts gefunden: gleich erklären, woran es liegen kann
     }
     else if(results.length === 1 && !X.status().state.match(/connecting|online/)) { connectTo(results[0].ip); toast('Pult gefunden: ' + (results[0].model || 'X32') + ' bei ' + results[0].ip + ' – verbinde …'); }

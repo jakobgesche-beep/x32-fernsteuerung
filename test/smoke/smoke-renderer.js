@@ -1,5 +1,7 @@
 (async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms)), $ = (s) => document.querySelector(s), R = {};
+  R.platform = window.x32API.platform; R.pcName = window.X32PLAT && X32PLAT.pc; R.hintText = (document.querySelector('#connect-hint p') || {}).textContent || '';
+  R.mic = await window.x32API.micStatus(); R.rew = await window.x32API.rewStatus(); R.version = await window.x32API.getVersion();
   // 0) Netzwerkzugriff beim Start: Ergebnis der Prüfung und Warnung im Startbildschirm
   await sleep(2500);
   R.netAccess = await window.x32API.netAccess(true); await sleep(300);

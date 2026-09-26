@@ -23,6 +23,9 @@ const Measure = (function () {
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function load(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v && typeof v === 'object' ? v : fallback; } catch (e) { return fallback; } }
   function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+  const PLAT = window.X32PLAT || { isMac: true, pc: 'Mac', settings: 'Systemeinstellungen' };
+  // Mikrofon-Freigabe des Betriebssystems: Mac "Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon", Windows "Einstellungen → Datenschutz & Sicherheit → Mikrofon"
+  const MIC_ALLOW = PLAT.isMac ? 'In den Systemeinstellungen unter Datenschutz & Sicherheit → Mikrofon „X32 Fernsteuerung“ einschalten' : 'In den Einstellungen unter Datenschutz & Sicherheit → Mikrofon den Mikrofonzugriff und „Desktop-Apps den Zugriff auf das Mikrofon erlauben“ einschalten';
   const say = (msg, isError) => { if (typeof toast === 'function') toast(msg, isError); };
 
   // weighting: Bewertung A (wie das Ohr), C (Bass stärker), Z (unbewertet). disp: wie träge die große Zahl ist:
@@ -310,7 +313,7 @@ registerProcessor('x32-tap', X32Tap);`;
     S.perm = await api.micRequest();
     if (S.perm === 'granted') { notice(''); return true; }
     if (S.perm === 'not-determined') notice('Für die Messung braucht die App Zugriff auf das Mikrofon bzw. das Audio-Interface.', [{ label: 'Zugriff erlauben', fn: start }], 'warn');
-    else notice('Der Zugriff auf das Mikrofon ist ausgeschaltet. In den Systemeinstellungen unter Datenschutz & Sicherheit → Mikrofon „X32 Fernsteuerung“ einschalten, danach hier erneut starten.', [{ label: 'Systemeinstellungen öffnen', fn: () => api.openMicSettings() }], 'bad');
+    else notice('Der Zugriff auf das Mikrofon ist ausgeschaltet. ' + MIC_ALLOW + ', danach hier erneut starten.', [{ label: PLAT.settings + ' öffnen', fn: () => api.openMicSettings() }], 'bad');
     return false;
   }
 
@@ -341,7 +344,7 @@ registerProcessor('x32-tap', X32Tap);`;
           onChannels: (n) => { fillChannels(n); if (S.cap) S.cap.setChannel(cfg.channel); },
           onEnded: () => { if (S.cap === cap) { stop(); notice('Das Eingabegerät wurde getrennt. Bitte Interface prüfen und erneut starten.', [], 'bad'); } },
         });
-      } catch (e) { notice(captureError(e), e && e.name === 'NotAllowedError' ? [{ label: 'Systemeinstellungen öffnen', fn: () => api.openMicSettings() }] : [], 'bad'); return; }
+      } catch (e) { notice(captureError(e), e && e.name === 'NotAllowedError' ? [{ label: PLAT.settings + ' öffnen', fn: () => api.openMicSettings() }] : [], 'bad'); return; }
       S.cap = cap; S.fs = cap.fs; freshMeters();
       cap.setChannel(cfg.channel);
       S.running = true;
@@ -354,7 +357,7 @@ registerProcessor('x32-tap', X32Tap);`;
 
   function captureError(e) {
     const n = e && e.name;
-    if (n === 'NotAllowedError' || n === 'SecurityError') return 'Zugriff auf das Mikrofon wurde nicht erlaubt. In den Systemeinstellungen unter Datenschutz & Sicherheit → Mikrofon „X32 Fernsteuerung“ einschalten.';
+    if (n === 'NotAllowedError' || n === 'SecurityError') return 'Zugriff auf das Mikrofon wurde nicht erlaubt. ' + MIC_ALLOW + '.';
     if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'Das gewählte Eingabegerät wurde nicht gefunden. Ist das Interface eingesteckt und eingeschaltet?';
     if (n === 'NotReadableError' || n === 'AbortError') return 'Das Eingabegerät lässt sich nicht öffnen – es wird vielleicht von einem anderen Programm benutzt.';
     return 'Die Messung konnte nicht gestartet werden: ' + ((e && e.message) || e);
@@ -693,7 +696,7 @@ registerProcessor('x32-tap', X32Tap);`;
   async function refreshRew() {
     S.rew = await api.rewStatus();
     if (!ui) return S.rew;
-    ui.rewInfo.textContent = S.rew.found ? 'Gefunden: ' + S.rew.path : 'REW wurde auf diesem Mac nicht gefunden. Wenn es an einem anderen Ort liegt: „Programm wählen…“.';
+    ui.rewInfo.textContent = S.rew.found ? 'Gefunden: ' + S.rew.path : 'REW wurde auf diesem ' + PLAT.pc + ' nicht gefunden. Wenn es an einem anderen Ort liegt: „Programm wählen…“.';
     ui.rewDl.hidden = S.rew.found;
     return S.rew;
   }
@@ -711,7 +714,7 @@ registerProcessor('x32-tap', X32Tap);`;
     const overlay = document.createElement('div'); overlay.className = 'overlay'; overlay.id = 'rew-missing';
     const box = document.createElement('div'); box.className = 'detail-card'; box.style.maxWidth = '420px';
     box.innerHTML = '<div class="detail-header"><div class="section-title" style="margin:0;">REW nicht gefunden</div></div>' +
-      '<p class="m-help">REW ist in „Programme“ nicht zu finden. Liegt es an einem anderen Ort, kannst du das Programm einmal auswählen, die App merkt es sich. Sonst hier herunterladen.</p>' +
+      '<p class="m-help">REW ist ' + (PLAT.isMac ? 'in „Programme“' : 'unter „Programme“ und im Startmenü') + ' nicht zu finden. Liegt es an einem anderen Ort, kannst du das Programm einmal auswählen, die App merkt es sich. Sonst hier herunterladen.</p>' +
       '<div class="m-row"><button class="btn" data-a="choose">Programm wählen…</button><button class="btn secondary" data-a="dl">REW herunterladen</button><button class="btn secondary" data-a="x">Abbrechen</button></div>';
     box.addEventListener('click', async (e) => {
       const a = e.target.dataset && e.target.dataset.a;

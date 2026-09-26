@@ -43,6 +43,23 @@ window.__mockInit = (mock) => {
     const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n') + '\n' + (fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
     return;
   }
+  if(params.get('view') === 'winhelp'){
+    // Windows: Wörter ("Computer" statt "Mac"), keine macOS-Hilfen, Firewall-Knopf (?plat=win32 erzwingt Windows in den Attrappen)
+    const $ = (s) => document.querySelector(s), $$ = (s) => Array.from(document.querySelectorAll(s)), C = window.__calls;
+    check('Betriebssystem Windows erkannt (X32PLAT), Wörter "Computer" und "Einstellungen"', X32PLAT.isWin === true && X32PLAT.isMac === false && X32PLAT.pc === 'Computer' && X32PLAT.settings === 'Einstellungen');
+    check('Startbildschirm: "Computer und X32 müssen im selben Netzwerk sein" (nicht "Mac"), macOS-Warnung versteckt', /^Computer und X32 müssen im selben Netzwerk sein/.test($('#connect-hint p').textContent) && $('#net-warning').hidden === true, $('#connect-hint p').textContent.slice(0, 60));
+    check('Kurztexte der Verbindungshilfe nennen den Computer und die Windows-Firewall, kein macOS', ConnectHelp.SHORT.subnet.startsWith('Computer und Pult') && ConnectHelp.SHORT['no-network'] === 'Der Computer ist mit keinem Netzwerk verbunden.' && /Windows-Firewall/.test(ConnectHelp.SHORT['maybe-blocked']) && !/Mac/.test(ConnectHelp.SHORT.subnet + ConnectHelp.SHORT['no-network']));
+    window.__diagResult = { checks: [{ id: 'net', level: 'ok', title: 'Netzwerk des Computers', detail: '192.168.178.44 (Netz 192.168.178.0/24, Ethernet)' }],
+      verdict: { id: 'maybe-blocked', level: 'warn', title: 'Das Gerät ist erreichbar, aber es kommt nichts zurück', text: 'Sehr wahrscheinlich blockiert die Windows-Firewall die Antworten.', steps: ['Beim ersten Start fragt Windows …', 'Windows-Sicherheit → Firewall …'], actions: [{ id: 'open-firewall', label: 'Firewall-Einstellungen öffnen' }, { id: 'scan', label: 'Pult im Netz suchen' }] }, info: { command: null } };
+    document.getElementById('ip-input').value = '192.168.178.60'; $('#cp-help').click(); await sleep(150);
+    check('Verbindungshilfe unter Windows: Urteil, Knopf "Firewall-Einstellungen öffnen" (kein "Systemeinstellungen", kein Terminal-Test)', /Windows-Firewall/.test($('.net-verdict').textContent) && $$('#help-actions button').map((b) => b.textContent).join('|') === 'Firewall-Einstellungen öffnen|Pult im Netz suchen');
+    $$('#help-actions button')[0].click(); await sleep(30);
+    check('Knopf "Firewall-Einstellungen öffnen" ruft das Hauptprogramm (openFirewall), nicht die macOS-Einstellungen', C.openFirewall === 1 && C.openPrivacy === 0 && !!$('#help-overlay'));
+    check('Protokoll-Knopf heißt "Im Explorer zeigen"', /Im Explorer zeigen/.test($('#help-open-log').textContent), $('#help-open-log').textContent);
+    $('.close-btn').click();
+    const pre = document.getElementById('out'); pre.style.display = 'block'; pre.textContent = out.join('\n') + '\n' + (fails ? '==> ' + fails + ' FEHLER' : '==> alle Tests bestanden');
+    return;
+  }
   if(params.get('view') === 'connhelp'){
     const $ = (s) => document.querySelector(s), $$ = (s) => Array.from(document.querySelectorAll(s));
     const C = window.__calls, ipIn = $('#ip-input'), toastText = () => $$('.toast').map((t) => t.textContent).join(' | ');

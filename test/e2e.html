@@ -8,7 +8,7 @@
 <section id="overview" class="overview"></section>
 <div id="console" class="console offline"><main id="app" class="app"></main><aside id="dock" class="dock"></aside>
 <div id="connect-progress" class="connect-hint connect-progress"><div class="hint-title" id="cp-title">Verbinde …</div><p id="cp-text"></p><div class="cp-actions" style="justify-content:center"><button id="cp-help" class="btn secondary">Hilfe bei der Verbindung</button><button id="cp-scan" class="btn secondary">Pult suchen</button><button id="cp-cancel" class="btn secondary">Abbrechen</button></div></div>
-<div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p>Mac und X32 müssen im selben Netzwerk sein.</p><div id="net-warning" class="net-warning" hidden><b>macOS blockiert diese App im lokalen Netzwerk.</b><span>Ohne die Freigabe kann sie das Pult nicht erreichen.</span><div class="cp-actions"><button id="nw-open" class="btn small">Systemeinstellungen öffnen</button><button id="nw-help" class="btn small secondary">Was tun?</button></div></div><button id="hint-scan-btn" class="btn">Pult suchen</button><button id="hint-offline-btn" class="btn secondary">Offline arbeiten</button><label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label></div></div>
+<div id="connect-hint" class="connect-hint"><div class="hint-title">Nicht mit einem Pult verbunden</div><p><span class="pc-name">Mac</span> und X32 müssen im selben Netzwerk sein.</p><div id="net-warning" class="net-warning" hidden><b>macOS blockiert diese App im lokalen Netzwerk.</b><span>Ohne die Freigabe kann sie das Pult nicht erreichen.</span><div class="cp-actions"><button id="nw-open" class="btn small">Systemeinstellungen öffnen</button><button id="nw-help" class="btn small secondary">Was tun?</button></div></div><button id="hint-scan-btn" class="btn">Pult suchen</button><button id="hint-offline-btn" class="btn secondary">Offline arbeiten</button><label class="auto-row"><input id="auto-connect" type="checkbox" checked> Beim Start automatisch suchen und verbinden</label></div></div>
 <section id="reserve" class="reserve"><span>Freie Fläche</span></section>
 </div>
 <section id="tools" class="tools" hidden></section>
@@ -22,7 +22,7 @@
 // Brücke wie im Hauptprozess: echte Verbindungsschicht + simuliertes Pult, statt UDP im Speicher verbunden
 const cbs = {}; let client = null, mock = null;
 window.__ctl = { get client(){ return client; }, get mock(){ return mock; }, emitMeter: (id, f) => cbs.meter && cbs.meter(id, f) };
-window.__calls = { scan: 0, connect: [], diagnose: [], openPrivacy: 0, openLog: 0, terminal: [], log: 'Zeile 1: Verbinden mit 10.0.0.5\nZeile 2: Keine Antwort' };
+window.__calls = { scan: 0, connect: [], diagnose: [], openPrivacy: 0, openFirewall: 0, openLog: 0, terminal: [], log: 'Zeile 1: Verbinden mit 10.0.0.5\nZeile 2: Keine Antwort' };
 window.__scanResult = { results: [], ifaces: [] }; window.__connectResult = null; window.__diagResult = null; window.__terminalResult = null;
 { const q = new URLSearchParams(location.search); try { if (q.get('seedip')) localStorage.setItem('x32-ip', q.get('seedip')); if (q.get('seedok')) localStorage.setItem('x32-ip-ok', q.get('seedok')); } catch (e) {} }
 window.x32API = {
@@ -30,7 +30,7 @@ window.x32API = {
   diagnose: async (ip, opts) => { window.__calls.diagnose.push([ip, opts]); return typeof window.__diagResult === 'function' ? window.__diagResult(ip, opts) : window.__diagResult; },
   terminalTest: async (ip) => { window.__calls.terminal.push(ip); return window.__terminalResult || { ok: true, replied: true }; },
   netAccess: async (force) => { window.__calls.netAccess = (window.__calls.netAccess || 0) + 1; return window.__netAccess || { blocked: false }; }, onNetAccess: (cb) => { window.__netAccessCb = cb; },
-  getLog: async () => window.__calls.log, openLog: async () => { window.__calls.openLog++; return true; }, openPrivacy: async () => { window.__calls.openPrivacy++; return true; },
+  getLog: async () => window.__calls.log, openLog: async () => { window.__calls.openLog++; return true; }, openPrivacy: async () => { window.__calls.openPrivacy++; return true; }, openFirewall: async () => { window.__calls.openFirewall++; return true; },
   connect: async (ip) => {
     window.__calls.connect.push(ip);
     if (window.__connectResult) return window.__connectResult;
@@ -60,6 +60,7 @@ window.x32API = {
   onUpdateAvailable: () => {}, onUpdateProgress: () => {}, onUpdateError: () => {},
 };
 </script>
+<script src="../renderer/platform.js"></script>
 <script src="../renderer/icons.js"></script>
 <script src="../renderer/store.js"></script>
 <script src="../renderer/fader.js"></script>

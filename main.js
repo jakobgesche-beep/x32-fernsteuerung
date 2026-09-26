@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, session, systemPreferences, dialog } = require("electron");
+const IS_MAC = process.platform === "darwin", IS_WIN = process.platform === "win32";
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
@@ -8,18 +9,24 @@ const { pipeline } = require("stream/promises");
 const X32Connection = require("./shared/connection");
 const REW = require("./shared/rew");
 
-// Live-Betrieb: macOS ("App Nap") und Chromium drosseln Programme mit verdecktem/minimiertem Fenster,
+// Live-Betrieb: macOS ("App Nap"), Windows und Chromium drosseln Programme mit verdecktem/minimiertem Fenster,
 // dann laufen Timer viel langsamer und Mute/Fader kämen verzögert an. Das schalten wir ab.
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 let sleepBlockerId = null;
 function keepAwake(on) {
-  if (on && sleepBlockerId === null) sleepBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+  // solange mit dem Pult verbunden: weder der Rechner noch der Bildschirm gehen schlafen (Touch-Monitor am FOH soll nicht dunkel werden)
+  if (on && sleepBlockerId === null) sleepBlockerId = powerSaveBlocker.start("prevent-display-sleep");
   else if (!on && sleepBlockerId !== null) { powerSaveBlocker.stop(sleepBlockerId); sleepBlockerId = null; }
 }
 
 let mainWindow = null;
+
+// Nur ein Programmfenster: ein zweiter Start (Doppelklick, Update) holt das vorhandene nach vorn, statt ein zweites zu öffnen, das denselben UDP-Port braucht
+const GOT_LOCK = app.requestSingleInstanceLock();
+if (!GOT_LOCK) app.quit();
+else app.on("second-instance", () => { if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 
 function toRenderer(channel, ...args) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args);
@@ -50,8 +57,19 @@ ipcMain.handle("x32-terminal-test", async (event, ip) => conn.terminalTest(Strin
 ipcMain.handle("x32-net-access", async (event, force) => { const a = conn.netAccess; if (!force && a && Date.now() - a.at < 3000) return a; return conn.checkLocalNetwork(); });
 ipcMain.handle("x32-get-log", async () => conn.logText());
 ipcMain.handle("x32-open-log", async () => { const f = path.join(app.getPath("userData"), "verbindung.log"); if (fs.existsSync(f)) shell.showItemInFolder(f); else shell.openPath(app.getPath("userData")); return true; });
-// Systemeinstellungen: Datenschutz & Sicherheit → Lokales Netzwerk
-ipcMain.handle("x32-open-privacy", async () => { try { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"); } catch (e) { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security"); } return true; });
+// macOS: Systemeinstellungen → Datenschutz & Sicherheit → Lokales Netzwerk
+ipcMain.handle("x32-open-privacy", async () => {
+  if (!IS_MAC) return false;
+  try { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"); } catch (e) { await shell.openExternal("x-apple.systempreferences:com.apple.preference.security"); }
+  return true;
+});
+// Windows: "Eine App durch die Windows-Firewall zulassen" (Systemsteuerung), sonst die Seite "Firewall & Netzwerkschutz" der Windows-Sicherheit
+ipcMain.handle("x32-open-firewall", async () => {
+  if (!IS_WIN) return false;
+  const opened = await new Promise((resolve) => execFile("control.exe", ["/name", "Microsoft.WindowsFirewall", "/page", "pnlFlags"], { windowsHide: false }, (err) => resolve(!err)));
+  if (!opened) { try { await shell.openExternal("windowsdefender://network"); } catch (e) { return false; } }
+  return true;
+});
 
 // Netzwerk-Test: nur lesend (32 Einzelanfragen + 32 auf einmal), ändert nichts am Pult
 ipcMain.handle("x32-network-test", () => new Promise((resolve) => {
@@ -101,18 +119,19 @@ function setupMediaPermissions() {
   });
 }
 function micStatus() {
-  return process.platform === "darwin" ? systemPreferences.getMediaAccessStatus("microphone") : "granted";
+  if (!IS_MAC && !IS_WIN) return "granted";
+  try { const s = systemPreferences.getMediaAccessStatus("microphone"); return s === "unknown" ? "granted" : s; } catch (e) { return "granted"; }
 }
 ipcMain.handle("mic-status", async () => micStatus());
 // fragt bei "noch nicht entschieden" den macOS-Dialog an, liefert danach den Status
 ipcMain.handle("mic-request", async () => {
-  if (process.platform === "darwin" && micStatus() === "not-determined") {
+  if (IS_MAC && micStatus() === "not-determined") {
     try { await systemPreferences.askForMediaAccess("microphone"); } catch (e) { log("Mikrofon-Anfrage fehlgeschlagen: " + e.message); }
   }
   return micStatus();
 });
 ipcMain.handle("mic-open-settings", async () => {
-  await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
+  await shell.openExternal(IS_WIN ? "ms-settings:privacy-microphone" : "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone");
   return true;
 });
 
@@ -122,11 +141,21 @@ function writeSettings(patch) {
   try { fs.mkdirSync(path.dirname(settingsFile()), { recursive: true }); fs.writeFileSync(settingsFile(), JSON.stringify({ ...readSettings(), ...patch })); } catch (e) { log("Einstellungen nicht gespeichert: " + e.message); }
 }
 function findRew() {
+  const env = process.env, list = (d) => { try { return fs.readdirSync(d); } catch (e) { return []; } };
+  if (IS_WIN) {
+    return REW.findRew({
+      platform: "win32", saved: readSettings().rewPath, home: os.homedir(), join: path.win32.join,
+      exists: (p) => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } },
+      list,
+      programDirs: [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && path.win32.join(env.LOCALAPPDATA, "Programs"), env.ProgramW6432].filter(Boolean),
+      startMenuDirs: [env.ProgramData && path.win32.join(env.ProgramData, "Microsoft", "Windows", "Start Menu", "Programs"), env.APPDATA && path.win32.join(env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs")].filter(Boolean),
+    });
+  }
   return REW.findRew({
     saved: readSettings().rewPath,
     home: os.homedir(),
     exists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (e) { return false; } },
-    list: (d) => { try { return fs.readdirSync(d); } catch (e) { return []; } },
+    list,
   });
 }
 ipcMain.handle("rew-status", async () => { const r = findRew(); return { found: !!r, path: r ? r.path : null }; });
@@ -138,14 +167,14 @@ ipcMain.handle("rew-open", async () => {
 });
 // Programm von Hand wählen, falls REW an einem anderen Ort liegt
 ipcMain.handle("rew-choose", async () => {
-  const res = await dialog.showOpenDialog(mainWindow, {
-    title: "REW auswählen", defaultPath: "/Applications", properties: ["openFile"], filters: [{ name: "Programme", extensions: ["app"] }],
-  });
+  const res = await dialog.showOpenDialog(mainWindow, IS_WIN
+    ? { title: "REW auswählen", defaultPath: process.env.ProgramFiles || "C:\\Program Files", properties: ["openFile"], filters: [{ name: "Programme", extensions: ["exe", "lnk"] }] }
+    : { title: "REW auswählen", defaultPath: "/Applications", properties: ["openFile"], filters: [{ name: "Programme", extensions: ["app"] }] });
   if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
   const p = res.filePaths[0];
   let isApp = false;
-  try { isApp = p.toLowerCase().endsWith(".app") && fs.statSync(p).isDirectory(); } catch (e) {}
-  if (!isApp) return { ok: false, error: "Das ist kein Programm (.app)." };
+  try { isApp = IS_WIN ? /\.(exe|lnk)$/i.test(p) && fs.statSync(p).isFile() : p.toLowerCase().endsWith(".app") && fs.statSync(p).isDirectory(); } catch (e) {}
+  if (!isApp) return { ok: false, error: IS_WIN ? "Das ist kein Programm (.exe)." : "Das ist kein Programm (.app)." };
   writeSettings({ rewPath: p });
   return { ok: true, path: p };
 });
@@ -171,18 +200,22 @@ function createWindow() {
     width: 1200,
     height: 820,
     backgroundColor: "#0D1117",
+    autoHideMenuBar: !IS_MAC,                                   // Windows: keine Menüleiste (mit Alt einblendbar); F11 = Vollbild
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
   });
+  if (!IS_MAC) mainWindow.setMenuBarVisibility(false);
+  mainWindow.webContents.on("before-input-event", (event, input) => { if (input.type === "keyDown" && input.key === "F11") { mainWindow.setFullScreen(!mainWindow.isFullScreen()); event.preventDefault(); } });
   mainWindow.webContents.setVisualZoomLevelLimits(1, 1);          // kein Zoomen mit zwei Fingern (Fader nicht versehentlich verstellen)
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
 }
 
 // ---------- Eigener Updater ----------
-// electron-updater/Squirrel.Mac verlangt eine echte Apple-Signatur und bricht bei
+// Mac: electron-updater/Squirrel.Mac verlangt eine echte Apple-Signatur und bricht bei
 // ad-hoc-signierten Apps stillschweigend ab. Deshalb: neue .zip von GitHub laden,
 // entpacken, die App-Datei nach dem Beenden austauschen und neu starten.
+// Windows: das Installationsprogramm (Setup.exe) von GitHub laden und starten; es ersetzt die App und öffnet sie wieder.
 const UPDATE_REPO = "jakobgesche-beep/x32-fernsteuerung";
-const UPDATE_ASSET = "X32-Fernsteuerung.zip";
+const UPDATE_ASSET = IS_WIN ? "X32-Fernsteuerung-Setup.exe" : "X32-Fernsteuerung.zip";
 let pendingUpdate = null;
 
 function versionParts(v) { return String(v).replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0); }
@@ -211,7 +244,7 @@ async function findLatestRelease() {
     const asset = (rel.assets || []).find((a) => a.name === UPDATE_ASSET);
     if (!asset) continue;
     const version = String(rel.tag_name).replace(/^v/, "");
-    if (!best || isNewer(version, best.version)) best = { version, zipUrl: asset.browser_download_url, pageUrl: rel.html_url };
+    if (!best || isNewer(version, best.version)) best = { version, assetUrl: asset.browser_download_url, pageUrl: rel.html_url };
   }
   return best;
 }
@@ -233,23 +266,10 @@ function run(cmd, args) {
   });
 }
 
-async function downloadAndInstall(update) {
-  const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
-  if (!bundlePath.endsWith(".app")) throw new Error("App-Pfad nicht erkannt: " + bundlePath);
-  try { fs.accessSync(path.dirname(bundlePath), fs.constants.W_OK); }
-  catch (e) {
-    shell.openExternal(update.pageUrl);
-    throw new Error("Kein Schreibzugriff auf den Ordner der App — die Download-Seite wurde geöffnet, bitte manuell installieren.");
-  }
-
-  const workDir = path.join(app.getPath("temp"), "x32-update");
-  fs.rmSync(workDir, { recursive: true, force: true });
-  fs.mkdirSync(workDir, { recursive: true });
-  const zipPath = path.join(workDir, "update.zip");
-  const extractDir = path.join(workDir, "extracted");
-
+// Datei laden, dabei den Fortschritt melden
+async function downloadTo(url, file) {
   sendUpdate("update-progress", "Lade Update herunter... 0 %");
-  const res = await fetch(update.zipUrl, { redirect: "follow" });
+  const res = await fetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error("Download fehlgeschlagen (Status " + res.status + ")");
   const total = Number(res.headers.get("content-length")) || 0;
   let received = 0, lastPercent = -1;
@@ -259,7 +279,43 @@ async function downloadAndInstall(update) {
     const percent = total ? Math.floor((received / total) * 100) : 0;
     if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); }
   });
-  await pipeline(body, fs.createWriteStream(zipPath));
+  await pipeline(body, fs.createWriteStream(file));
+  if (total && received < total) throw new Error("Der Download ist unvollständig (" + received + " von " + total + " Byte).");
+}
+function freshWorkDir() {
+  const workDir = path.join(app.getPath("temp"), "x32-update");
+  fs.rmSync(workDir, { recursive: true, force: true });
+  fs.mkdirSync(workDir, { recursive: true });
+  return workDir;
+}
+
+// Windows: Installationsprogramm laden und starten, dann beenden. Es ist ein "Ein-Klick"-Installer für den eigenen Benutzer (kein Administrator nötig),
+// beendet die laufende App selbst, ersetzt sie und öffnet sie danach wieder.
+async function downloadAndInstallWin(update) {
+  const exe = path.join(freshWorkDir(), UPDATE_ASSET);
+  await downloadTo(update.assetUrl, exe);
+  if (fs.statSync(exe).size < 10 * 1024 * 1024) throw new Error("Die heruntergeladene Datei ist zu klein und wird nicht gestartet.");
+  sendUpdate("update-progress", "Starte die Installation...");
+  const child = spawn(exe, ["--updated"], { detached: true, stdio: "ignore" });
+  await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+  child.unref();
+  setTimeout(() => app.quit(), 500);
+}
+
+async function downloadAndInstall(update) {
+  if (IS_WIN) return downloadAndInstallWin(update);
+  const bundlePath = path.resolve(app.getPath("exe"), "..", "..", "..");
+  if (!bundlePath.endsWith(".app")) throw new Error("App-Pfad nicht erkannt: " + bundlePath);
+  try { fs.accessSync(path.dirname(bundlePath), fs.constants.W_OK); }
+  catch (e) {
+    shell.openExternal(update.pageUrl);
+    throw new Error("Kein Schreibzugriff auf den Ordner der App — die Download-Seite wurde geöffnet, bitte manuell installieren.");
+  }
+
+  const workDir = freshWorkDir();
+  const zipPath = path.join(workDir, "update.zip");
+  const extractDir = path.join(workDir, "extracted");
+  await downloadTo(update.assetUrl, zipPath);
 
   sendUpdate("update-progress", "Entpacke Update...");
   await run("ditto", ["-x", "-k", zipPath, extractDir]);
@@ -310,10 +366,11 @@ ipcMain.handle("install-update", async () => {
 ipcMain.handle("get-version", async () => app.getVersion());
 
 app.whenReady().then(() => {
+  if (!GOT_LOCK) return;
   setupMediaPermissions();
   createWindow();
   checkForUpdate();
-  conn.log("=== App gestartet: X32 Fernsteuerung " + app.getVersion() + ", macOS " + os.release() + " (Darwin), Electron " + process.versions.electron + " ===");
+  conn.log("=== App gestartet: X32 Fernsteuerung " + app.getVersion() + ", " + (IS_MAC ? "macOS " + os.release() + " (Darwin)" : IS_WIN ? "Windows " + os.release() + " (" + process.arch + ")" : process.platform + " " + os.release()) + ", Electron " + process.versions.electron + " ===");
   conn.wakeLocalNetwork().then((a) => toRenderer("x32-net-access", a)).catch(() => {});       // macOS soll die Freigabe für das lokale Netzwerk jetzt abfragen, nicht erst beim Verbinden
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
