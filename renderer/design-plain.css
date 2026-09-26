@@ -8,8 +8,8 @@ body.plain{
   --text:#e5e5e7; --text-dim:#bcbcc0; --muted:#8b8b90;
   --ok:#30d158; --ok-dim:#1f6b35; --danger:#ff453a; --danger-dim:#7a2a26;
   --radius-s:6px; --radius-m:8px;
-  --font-head:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
-  --font-body:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --font-head:-apple-system,BlinkMacSystemFont,"Segoe UI","SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI","SF Pro Text","Helvetica Neue",Arial,sans-serif;
   --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --cap-default:#8b8b90;
   --chart:#6CB0FF; --chart-hi:#9CC8FF; --chart-lo:#3F7FCC;

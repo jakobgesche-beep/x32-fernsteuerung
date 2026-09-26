@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>X32 Fernsteuerung – Download</title>
+<meta name="color-scheme" content="dark light">
+<style>
+  :root { --bg:#1c1c1e; --panel:#2a2a2d; --line:#3a3a3e; --text:#ececef; --dim:#b4b4ba; --muted:#8a8a92; --accent:#0a84ff; --accent-ink:#ffffff; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f4f4f6; --panel:#ffffff; --line:#d9d9de; --text:#1c1c1e; --dim:#4a4a50; --muted:#75757d; --accent:#0a6cff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:720px; margin:0 auto; padding:40px 20px 64px; }
+  h1 { font-size:26px; margin:0 0 6px; letter-spacing:-0.01em; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .lead { color:var(--dim); margin:0 0 26px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px; }
+  .dl { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }
+  .dl a { display:block; text-decoration:none; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .dl a b { display:block; font-size:16px; margin-bottom:2px; }
+  .dl a span { color:var(--muted); font-size:13px; }
+  .dl a.main { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  .dl a.main span { color:rgba(255,255,255,0.8); }
+  .dl a[aria-disabled="true"] { opacity:0.55; pointer-events:none; }
+  .version { color:var(--muted); font-size:13px; margin:12px 0 0; min-height:1.2em; }
+  ol, ul { margin:0 0 4px; padding-left:22px; color:var(--dim); }
+  li { margin-bottom:6px; }
+  p { margin:0 0 10px; color:var(--dim); }
+  .tip { color:var(--muted); font-size:13px; }
+  code { background:rgba(127,127,127,0.18); padding:1px 6px; border-radius:5px; font-size:13px; }
+  a.plain { color:var(--accent); overflow-wrap:anywhere; }
+  .os-win, .os-mac { display:none; }
+  body.is-win .os-win, body.is-mac .os-mac { display:block; }
+  body:not(.is-win):not(.is-mac) .os-win, body:not(.is-win):not(.is-mac) .os-mac { display:block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>X32 Fernsteuerung</h1>
+  <p class="lead">Fader, Mute, EQ, Kompressor, Live-Pegel und mehr für das Behringer X32 (und M32). Am Computer oder am Touch-Monitor, im selben Netzwerk wie das Pult.</p>
+
+  <div class="card">
+    <h2>Software herunterladen</h2>
+    <div class="dl" id="dl">
+      <a id="dl-win" href="https://github.com/jakobgesche-beep/x32-fernsteuerung/releases/latest/download/X32-Fernsteuerung-Setup.exe"><b>Windows</b><span>Installationsprogramm (.exe)</span></a>
+      <a id="dl-mac" href="https://github.com/jakobgesche-beep/x32-fernsteuerung/releases/latest/download/X32-Fernsteuerung.dmg"><b>Mac</b><span>Apple-Programm (.dmg)</span></a>
+    </div>
+    <p class="version" id="version"></p>
+  </div>
+
+  <div class="card os-win">
+    <h2>Installieren unter Windows</h2>
+    <ol>
+      <li>Die Datei <code>X32-Fernsteuerung-Setup.exe</code> herunterladen und doppelklicken.</li>
+      <li>Windows warnt eventuell: „Der Computer wurde durch Windows geschützt“. Das kommt, weil das Programm kein bezahltes Microsoft-Zertifikat hat. Auf <b>„Weitere Informationen“</b> klicken, dann auf <b>„Trotzdem ausführen“</b>.</li>
+      <li>Das Programm installiert sich von selbst (ohne Administrator) und öffnet sich danach. Auf dem Desktop liegt eine Verknüpfung.</li>
+      <li>Beim ersten Verbinden fragt die Windows-Firewall. <b>„Zugriff zulassen“</b> wählen (mit Haken bei „Private Netzwerke“). Sonst kommen keine Antworten vom Pult.</li>
+      <li>Neue Versionen meldet die App selbst (blaue Leiste oben) und installiert sie mit einem Klick.</li>
+    </ol>
+    <p class="tip">Für den Touch-Monitor: oben auf <b>Touch</b> tippen (große Tasten und Fader), mit <b>Vollbild</b> oder der Taste <code>F11</code> den ganzen Bildschirm nutzen.</p>
+  </div>
+
+  <div class="card os-mac">
+    <h2>Installieren auf dem Mac</h2>
+    <ol>
+      <li>Die Datei <code>.dmg</code> öffnen und die App in „Programme“ ziehen.</li>
+      <li>Beim ersten Start warnt macOS eventuell („nicht verifizierter Entwickler“). Rechtsklick auf die App → <b>„Öffnen“</b> → noch einmal „Öffnen“. Das ist nur einmal nötig.</li>
+      <li>macOS fragt nach dem Zugriff aufs lokale Netzwerk: <b>„Erlauben“</b> wählen.</li>
+      <li>Neue Versionen meldet die App selbst und installiert sie mit einem Klick.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Verbindung zum Pult</h2>
+    <p>Computer und Pult müssen im <b>selben Netzwerk</b> sein (zum Beispiel am selben Router). Kein Internet nötig.</p>
+    <p>Die IP-Adresse des Pults steht am Pult unter <code>SETUP → NETWORK</code>. Oder in der App auf <b>„Pult suchen“</b> drücken: die App findet das Pult von selbst. Klappt es nicht, erklärt die <b>Verbindungshilfe</b> in einfachen Worten, woran es liegt.</p>
+  </div>
+
+  <p class="tip">Quellcode und ältere Versionen: <a class="plain" href="https://github.com/jakobgesche-beep/x32-fernsteuerung/releases">github.com/jakobgesche-beep/x32-fernsteuerung</a></p>
+</div>
+<script>
+(function () {
+  // Betriebssystem des Besuchers: passende Datei hervorheben und nach oben stellen, passende Anleitung zeigen
+  var nav = window.navigator || {}, ua = String((nav.userAgentData && nav.userAgentData.platform) || nav.platform || "") + " " + String(nav.userAgent || "");
+  var win = /win/i.test(ua) && !/darwin/i.test(ua), mac = /mac|iphone|ipad/i.test(ua) && !win;
+  var dlWin = document.getElementById("dl-win"), dlMac = document.getElementById("dl-mac"), box = document.getElementById("dl");
+  if (win) { document.body.classList.add("is-win"); dlWin.className = "main"; }
+  else if (mac) { document.body.classList.add("is-mac"); dlMac.className = "main"; box.insertBefore(dlMac, dlWin); }
+  // Version und Größe aus der neuesten Veröffentlichung (nur Hinweis; ohne Internet-Antwort bleiben die Knöpfe trotzdem gültig)
+  var mb = function (n) { return (n / 1048576).toFixed(0) + " MB"; };
+  fetch("https://api.github.com/repos/jakobgesche-beep/x32-fernsteuerung/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.status)); })
+    .then(function (rel) {
+      var by = {}; (rel.assets || []).forEach(function (a) { by[a.name] = a; });
+      var d = rel.published_at ? new Date(rel.published_at).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" }) : "";
+      document.getElementById("version").textContent = "Neueste Version " + String(rel.tag_name || "").replace(/^v/, "") + (d ? " vom " + d : "");
+      var fill = function (el, name, label) {
+        var a = by[name];
+        if (a) el.querySelector("span").textContent = label + " · " + mb(a.size);
+        else { el.setAttribute("aria-disabled", "true"); el.querySelector("span").textContent = "Für diese Version noch nicht verfügbar"; }
+      };
+      fill(dlWin, "X32-Fernsteuerung-Setup.exe", "Installationsprogramm (.exe)"); fill(dlMac, "X32-Fernsteuerung.dmg", "Apple-Programm (.dmg)");
+    })
+    .catch(function () { /* kein Problem: die Knöpfe führen trotzdem zur neuesten Datei */ });
+})();
+</script>
+</body>
+</html>

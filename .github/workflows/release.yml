@@ -40,6 +40,55 @@ jobs:
       - run: node test/net-test.js
       - run: node test/smoke-ci.js
       - run: npx electron-builder --win --publish never
+      # Den gebauten Installer wirklich ausprobieren: still installieren, starten, dann das Update über denselben Weg wie in der App (laden, Installer starten,
+      # App beenden, neu installieren, App startet wieder) mit dem gleichen Installer von einem lokalen Server
+      - name: Installer und Selbst-Update testen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = (Resolve-Path 'dist\X32-Fernsteuerung-Setup.exe').Path
+          "Installer: $setup ($([math]::Round((Get-Item $setup).Length / 1MB)) MB)"
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          "Installer beendet mit Code $($p.ExitCode)"
+          Start-Sleep -Seconds 3
+          $programs = Join-Path $env:LOCALAPPDATA 'Programs'
+          Get-ChildItem $programs | Format-Table Name
+          $exe = Get-ChildItem $programs -Recurse -Filter 'X32 Fernsteuerung.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Programm wurde nicht installiert' }
+          "Installiert: $($exe.FullName)"
+          if (-not (Get-ChildItem $exe.DirectoryName -Filter 'Uninstall*.exe')) { throw 'Kein Deinstallationsprogramm gefunden' }
+          Get-ChildItem "$env:USERPROFILE\Desktop\*.lnk", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\*.lnk" -ErrorAction SilentlyContinue | Format-Table FullName
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          & $exe.FullName -e "console.log('Electron ' + process.versions.electron + ' auf ' + process.platform + ' ' + process.arch)"
+          Remove-Item Env:ELECTRON_RUN_AS_NODE
+          # 1) Das installierte Programm startet (mit Fenster) und beendet sich selbst
+          $env:X32_SELFTEST_EXIT = '7000'
+          $proc = Start-Process -FilePath $exe.FullName -PassThru
+          if (-not $proc.WaitForExit(40000)) { $proc.Kill(); throw 'Das Programm hat sich nicht selbst beendet' }
+          "Programm beendet mit Code $($proc.ExitCode)"
+          $log = Get-ChildItem $env:APPDATA -Recurse -Filter 'verbindung.log' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $log) { throw 'Keine Protokolldatei (verbindung.log) gefunden' }
+          Get-Content $log.FullName
+          if (-not (Select-String -Path $log.FullName -Pattern 'App gestartet: X32 Fernsteuerung .*Windows')) { throw 'Start nicht im Protokoll' }
+          # 2) Selbst-Update: Installer von einem lokalen Server laden lassen
+          Remove-Item $log.FullName
+          $server = Start-Process -FilePath python -ArgumentList '-m','http.server','8123','--directory','dist' -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $env:X32_SELFTEST_UPDATE_URL = 'http://127.0.0.1:8123/X32-Fernsteuerung-Setup.exe'
+          $env:X32_SELFTEST_EXIT = '30000'
+          $proc = Start-Process -FilePath $exe.FullName -PassThru
+          $seen = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-Path $log.FullName) { $n = @(Select-String -Path $log.FullName -Pattern 'App gestartet: X32 Fernsteuerung').Count; if ($n -ge 2) { $seen = $true; break } }
+          }
+          Start-Sleep -Seconds 2
+          if (Test-Path $log.FullName) { Get-Content $log.FullName }
+          Get-Process | Where-Object { $_.ProcessName -like 'X32*' } | Format-Table Id, ProcessName, StartTime
+          $server.Kill()
+          Get-Process | Where-Object { $_.ProcessName -like 'X32*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (-not $seen) { throw 'Nach dem Selbst-Update wurde die App nicht wieder gestartet (Protokoll zeigt nur einen Start)' }
+          'Selbst-Update: App wurde installiert und neu gestartet'
       - uses: actions/upload-artifact@v4
         with:
           name: windows

@@ -2,6 +2,8 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
+  <!-- In einem normalen Browser (ohne die App, kein Zugriff aufs Netz möglich) zeigt die Adresse die Download-Seite statt einer kaputten Oberfläche -->
+  <script>if (!window.x32API) location.replace('download.html');</script>
 <title>X32 Fernsteuerung</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css" />

@@ -293,8 +293,10 @@ function freshWorkDir() {
 // beendet die laufende App selbst, ersetzt sie und öffnet sie danach wieder.
 async function downloadAndInstallWin(update) {
   const exe = path.join(freshWorkDir(), UPDATE_ASSET);
+  conn.log("Update: lade " + update.assetUrl);
   await downloadTo(update.assetUrl, exe);
   if (fs.statSync(exe).size < 10 * 1024 * 1024) throw new Error("Die heruntergeladene Datei ist zu klein und wird nicht gestartet.");
+  conn.log("Update: Installationsprogramm geladen (" + Math.round(fs.statSync(exe).size / 1048576) + " MB), starte es und beende die App");
   sendUpdate("update-progress", "Starte die Installation...");
   const child = spawn(exe, ["--updated"], { detached: true, stdio: "ignore" });
   await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
@@ -372,6 +374,17 @@ app.whenReady().then(() => {
   checkForUpdate();
   conn.log("=== App gestartet: X32 Fernsteuerung " + app.getVersion() + ", " + (IS_MAC ? "macOS " + os.release() + " (Darwin)" : IS_WIN ? "Windows " + os.release() + " (" + process.arch + ")" : process.platform + " " + os.release()) + ", Electron " + process.versions.electron + " ===");
   conn.wakeLocalNetwork().then((a) => toRenderer("x32-net-access", a)).catch(() => {});       // macOS soll die Freigabe für das lokale Netzwerk jetzt abfragen, nicht erst beim Verbinden
+});
+// Selbsttest des gebauten Programms (nur in GitHub Actions; ohne diese Umgebungsvariablen geschieht nichts):
+// X32_SELFTEST_EXIT = nach so vielen ms beenden; X32_SELFTEST_UPDATE_URL = einmalig ein Update von dieser Adresse laden und installieren
+if (process.env.X32_SELFTEST_EXIT) app.whenReady().then(() => setTimeout(() => app.quit(), Math.max(1000, parseInt(process.env.X32_SELFTEST_EXIT, 10) || 5000)));
+if (process.env.X32_SELFTEST_UPDATE_URL) app.whenReady().then(() => {
+  const marker = path.join(os.tmpdir(), "x32-selftest-updated");
+  if (!app.isPackaged || fs.existsSync(marker)) return;
+  setTimeout(() => {
+    try { fs.writeFileSync(marker, "1"); } catch (e) {}
+    downloadAndInstall({ version: "0.0.0-test", assetUrl: process.env.X32_SELFTEST_UPDATE_URL, pageUrl: "" }).catch((e) => conn.log("Selbsttest-Update fehlgeschlagen: " + e.message));
+  }, 3000);
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
