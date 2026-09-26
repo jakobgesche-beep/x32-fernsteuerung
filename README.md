@@ -134,7 +134,7 @@ Der Bau läuft bei GitHub (kein Node.js/Terminal auf dem eigenen Rechner nötig)
 3. **release**: legt EIN Release mit allen Dateien auf einmal an (früher entstanden zwei halbe Releases, die man von Hand aufräumen musste).
    Schlägt Windows fehl, erscheint das Release trotzdem (ohne `.exe`); die Windows-App aktualisiert sich dann nicht.
 
-Ohne Tag (Handstart oder Zweig `win-probe`) wird nur gebaut und geprüft; die Dateien hängen dann als Artefakte am Lauf.
+Ohne Tag (Handstart über „Run workflow“) wird nur gebaut und geprüft; die Dateien hängen dann als Artefakte am Lauf.
 
 **Hinweise:** Ohne Apple-Entwicklerzertifikat wird die Mac-App "ad-hoc" signiert (sonst lehnt macOS sie als "beschädigt" ab); beim
 allerersten Start kann macOS einmalig warnen (Rechtsklick → "Öffnen"). Der Windows-Installer ist nicht signiert: Windows SmartScreen zeigt

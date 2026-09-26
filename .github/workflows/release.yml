@@ -1,13 +1,12 @@
 name: Build & Release
 
 # Bei jedem Tag "v…": Mac-App (.dmg, .zip) und Windows-Installer (.exe) bauen und als EIN Release veröffentlichen.
-# Ohne Tag (Handstart oder Zweig "win-erprobung") wird nur gebaut und geprüft; die Dateien hängen dann als "Artefakte" am Lauf.
+# Ohne Tag (Handstart über "Run workflow") wird nur gebaut und geprüft; die Dateien hängen dann als "Artefakte" am Lauf.
+# Zum Erproben eines Zweigs: unter "on: push" vorübergehend "branches: [zweigname]" ergänzen.
 on:
   push:
     tags:
       - "v*"
-    branches:
-      - win-probe
   workflow_dispatch: {}
 
 jobs:
