@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, session, systemPreferences, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, session, systemPreferences, dialog, net } = require("electron");
 const IS_MAC = process.platform === "darwin", IS_WIN = process.platform === "win32";
 const path = require("path");
 const os = require("os");
@@ -231,7 +231,7 @@ function sendUpdate(channel, payload) {
 }
 
 async function findLatestRelease() {
-  const res = await fetch("https://api.github.com/repos/" + UPDATE_REPO + "/releases?per_page=10", {
+  const res = await net.fetch("https://api.github.com/repos/" + UPDATE_REPO + "/releases?per_page=10", {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "x32-fernsteuerung" },
   });
   if (!res.ok) throw new Error("GitHub antwortet mit Status " + res.status);
@@ -264,11 +264,12 @@ function run(cmd, args) {
   });
 }
 
-// Datei laden, dabei den Fortschritt melden. Die Teile werden nacheinander in die Datei geschrieben (kein pipeline/pipe: unter Windows blieb der
-// Download damit bei etwa 75 % hängen, die Datei blieb leer)
+// Datei laden, dabei den Fortschritt melden. Mit net.fetch (Netzwerk von Chromium: nutzt die Proxy-Einstellungen und Zertifikate des Systems, wichtig in
+// Schul-Netzen) statt dem fetch von Node, und die Teile werden nacheinander in die Datei geschrieben (mit pipeline blieb der Download unter Windows bei
+// etwa 75 % hängen, mit dem fetch von Node stürzt undici bei manchen Servern ab)
 async function downloadTo(url, file) {
   sendUpdate("update-progress", "Lade Update herunter... 0 %");
-  const res = await fetch(url, { redirect: "follow" });
+  const res = await net.fetch(url, { redirect: "follow" });
   conn.log("Update: Antwort " + res.status + ", " + (res.headers.get("content-length") || "?") + " Byte");
   if (!res.ok) throw new Error("Download fehlgeschlagen (Status " + res.status + ")");
   const total = Number(res.headers.get("content-length")) || 0;
