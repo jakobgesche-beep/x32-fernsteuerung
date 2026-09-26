@@ -4,8 +4,6 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 const { execFile, spawn } = require("child_process");
-const { Readable } = require("stream");
-const { pipeline } = require("stream/promises");
 const X32Connection = require("./shared/connection");
 const REW = require("./shared/rew");
 
@@ -266,7 +264,8 @@ function run(cmd, args) {
   });
 }
 
-// Datei laden, dabei den Fortschritt melden
+// Datei laden, dabei den Fortschritt melden. Die Teile werden nacheinander in die Datei geschrieben (kein pipeline/pipe: unter Windows blieb der
+// Download damit bei etwa 75 % hängen, die Datei blieb leer)
 async function downloadTo(url, file) {
   sendUpdate("update-progress", "Lade Update herunter... 0 %");
   const res = await fetch(url, { redirect: "follow" });
@@ -274,13 +273,15 @@ async function downloadTo(url, file) {
   if (!res.ok) throw new Error("Download fehlgeschlagen (Status " + res.status + ")");
   const total = Number(res.headers.get("content-length")) || 0;
   let received = 0, lastPercent = -1;
-  const body = Readable.fromWeb(res.body);
-  body.on("data", (chunk) => {
-    received += chunk.length;
-    const percent = total ? Math.floor((received / total) * 100) : 0;
-    if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); if (percent % 25 === 0) conn.log("Update: " + percent + " % geladen"); }
-  });
-  await pipeline(body, fs.createWriteStream(file));
+  const fh = await fs.promises.open(file, "w");
+  try {
+    for await (const chunk of res.body) {
+      await fh.write(chunk);
+      received += chunk.length;
+      const percent = total ? Math.floor((received / total) * 100) : 0;
+      if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); if (percent % 25 === 0) conn.log("Update: " + percent + " % geladen"); }
+    }
+  } finally { await fh.close(); }
   if (total && received < total) throw new Error("Der Download ist unvollständig (" + received + " von " + total + " Byte).");
 }
 function freshWorkDir() {
