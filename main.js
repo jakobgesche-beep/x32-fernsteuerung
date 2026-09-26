@@ -270,6 +270,7 @@ function run(cmd, args) {
 async function downloadTo(url, file) {
   sendUpdate("update-progress", "Lade Update herunter... 0 %");
   const res = await fetch(url, { redirect: "follow" });
+  conn.log("Update: Antwort " + res.status + ", " + (res.headers.get("content-length") || "?") + " Byte");
   if (!res.ok) throw new Error("Download fehlgeschlagen (Status " + res.status + ")");
   const total = Number(res.headers.get("content-length")) || 0;
   let received = 0, lastPercent = -1;
@@ -277,7 +278,7 @@ async function downloadTo(url, file) {
   body.on("data", (chunk) => {
     received += chunk.length;
     const percent = total ? Math.floor((received / total) * 100) : 0;
-    if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); }
+    if (percent !== lastPercent) { lastPercent = percent; sendUpdate("update-progress", "Lade Update herunter... " + percent + " %"); if (percent % 25 === 0) conn.log("Update: " + percent + " % geladen"); }
   });
   await pipeline(body, fs.createWriteStream(file));
   if (total && received < total) throw new Error("Der Download ist unvollständig (" + received + " von " + total + " Byte).");

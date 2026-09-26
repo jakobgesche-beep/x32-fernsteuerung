@@ -72,19 +72,23 @@ jobs:
           if (-not (Select-String -Path $log.FullName -Pattern 'App gestartet: X32 Fernsteuerung .*Windows')) { throw 'Start nicht im Protokoll' }
           # 2) Selbst-Update: Installer von einem lokalen Server laden lassen
           Remove-Item $log.FullName
-          $server = Start-Process -FilePath python -ArgumentList '-m','http.server','8123','--directory','dist' -PassThru -WindowStyle Hidden
-          Start-Sleep -Seconds 2
+          $server = Start-Process -FilePath python -ArgumentList '-m','http.server','8123','--bind','127.0.0.1','--directory','dist' -PassThru -WindowStyle Hidden -RedirectStandardError server.err -RedirectStandardOutput server.out
+          Start-Sleep -Seconds 3
+          $head = Invoke-WebRequest -Uri 'http://127.0.0.1:8123/X32-Fernsteuerung-Setup.exe' -Method Head -UseBasicParsing
+          "Lokaler Server: Status $($head.StatusCode), $($head.Headers['Content-Length']) Byte"
           $env:X32_SELFTEST_UPDATE_URL = 'http://127.0.0.1:8123/X32-Fernsteuerung-Setup.exe'
           $env:X32_SELFTEST_EXIT = '30000'
           $proc = Start-Process -FilePath $exe.FullName -PassThru
           $seen = $false
           for ($i = 0; $i -lt 90; $i++) {
             Start-Sleep -Seconds 1
+            if ($i % 10 -eq 5) { $f = Get-ChildItem "$env:TEMP\x32-update" -Recurse -File -ErrorAction SilentlyContinue; "  [$i s] Temp-Datei: " + (($f | ForEach-Object { "$($_.Name) $($_.Length)" }) -join ', ') }
             if (Test-Path $log.FullName) { $n = @(Select-String -Path $log.FullName -Pattern 'App gestartet: X32 Fernsteuerung').Count; if ($n -ge 2) { $seen = $true; break } }
           }
           Start-Sleep -Seconds 2
           if (Test-Path $log.FullName) { Get-Content $log.FullName }
           Get-Process | Where-Object { $_.ProcessName -like 'X32*' } | Format-Table Id, ProcessName, StartTime
+          if (Test-Path server.err) { 'Server-Ausgabe:'; Get-Content server.err | Select-Object -Last 8 }
           $server.Kill()
           Get-Process | Where-Object { $_.ProcessName -like 'X32*' } | Stop-Process -Force -ErrorAction SilentlyContinue
           if (-not $seen) { throw 'Nach dem Selbst-Update wurde die App nicht wieder gestartet (Protokoll zeigt nur einen Start)' }

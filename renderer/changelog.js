@@ -1,5 +1,14 @@
 // "Neu in dieser Version": erscheint einmal nach einem Update. Neue Einträge oben in CHANGELOG ergänzen.
 const CHANGELOG = {
+  '2.12.0': {
+    title: 'Neu in Version 2.12.0 – Windows-Version',
+    items: [
+      ['Windows', 'Die App gibt es jetzt auch für Windows, zum Beispiel für den Touch-Monitor. Installation mit einem Klick, ohne Administrator; Updates macht die App selbst. Die Download-Seite ist die Adresse der Website.'],
+      ['Verbindungshilfe für Windows', 'Auf Windows erklärt die Hilfe die Windows-Firewall („Zugriff zulassen“) statt der macOS-Freigaben und hat einen Knopf, der die Firewall-Einstellungen öffnet.'],
+      ['Ausgleichswert von Hand', 'Im Live-Pegel kannst du den Ausgleichswert (Offset) direkt eintragen, ohne zu messen. Er gilt als genau. Die Mikrofon-Kalibrierdatei aus Version 2.11.0 gibt es nicht mehr: sie wird nicht gebraucht.'],
+      ['Bildschirm bleibt an', 'Solange die App mit dem Pult verbunden ist, geht der Bildschirm nicht aus.'],
+    ],
+  },
   '2.11.0': {
     title: 'Neu in Version 2.11.0 – Live-Pegel ruhiger und genauer',
     items: [

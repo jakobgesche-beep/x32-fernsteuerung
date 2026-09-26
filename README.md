@@ -1,6 +1,6 @@
-# X32 Fernsteuerung (Mac-App)
+# X32 Fernsteuerung (Mac- und Windows-App)
 
-Native macOS-App (Electron) zur Fernsteuerung eines **Behringer X32** (oder
+Native App (Electron) für **macOS und Windows** zur Fernsteuerung eines **Behringer X32** (oder
 M32) Digitalmischpults im lokalen Netzwerk: Fader, Mute, Live-Pegelanzeige
 für alle 32 Eingangskanäle, sowie EQ (4 Bänder) und Kompressor/Dynamics pro
 Kanal.
@@ -122,21 +122,41 @@ npm install
 npm start
 ```
 
-## Als echte Mac-App bauen und veröffentlichen
+## Mac- und Windows-App bauen und veröffentlichen
 
-Der Build läuft automatisch bei GitHub (kein Node.js/Terminal auf dem
-eigenen Mac nötig) — siehe `.github/workflows/build-mac.yml`. Ein neues
-Release auslösen:
+Der Bau läuft bei GitHub (kein Node.js/Terminal auf dem eigenen Rechner nötig), siehe `.github/workflows/release.yml`.
+**Ein Tag `vX.Y.Z` pushen** (die Version in `package.json` vorher erhöhen) startet drei Aufgaben:
 
-1. Auf [github.com/jakobgesche-beep/x32-fernsteuerung/actions/workflows/build-mac.yml](https://github.com/jakobgesche-beep/x32-fernsteuerung/actions/workflows/build-mac.yml)
-   gehen → **"Run workflow"**.
-2. Ein paar Minuten warten — danach liegt ein Release mit
-   `X32-Fernsteuerung.dmg` bereit.
+1. **mac**: baut `X32-Fernsteuerung.dmg` und `.zip` (ad-hoc signiert, siehe `scripts/afterSignAdHoc.js`).
+2. **windows**: testet unter echtem Windows (`test/net-test.js`, `test/smoke-ci.js`), baut den Installer `X32-Fernsteuerung-Setup.exe`
+   (NSIS, Ein-Klick, für den eigenen Benutzer, ohne Administrator) und **probiert ihn aus**: still installieren, Programm starten,
+   dann das Selbst-Update über denselben Weg wie in der App (laden, Installer starten, App beendet sich, Neuinstallation, App startet wieder).
+3. **release**: legt EIN Release mit allen Dateien auf einmal an (früher entstanden zwei halbe Releases, die man von Hand aufräumen musste).
+   Schlägt Windows fehl, erscheint das Release trotzdem (ohne `.exe`); die Windows-App aktualisiert sich dann nicht.
 
-**Hinweis:** Ohne Apple-Entwicklerzertifikat wird die App automatisch
-"ad-hoc" signiert (siehe `scripts/afterSignAdHoc.js`) — ohne das würde
-macOS sie als "beschädigt" ablehnen. Trotzdem kann macOS beim allerersten
-Start einmalig warnen; Rechtsklick → "Öffnen" → nochmal "Öffnen" bestätigen.
+Ohne Tag (Handstart oder Zweig `win-probe`) wird nur gebaut und geprüft; die Dateien hängen dann als Artefakte am Lauf.
+
+**Hinweise:** Ohne Apple-Entwicklerzertifikat wird die Mac-App "ad-hoc" signiert (sonst lehnt macOS sie als "beschädigt" ab); beim
+allerersten Start kann macOS einmalig warnen (Rechtsklick → "Öffnen"). Der Windows-Installer ist nicht signiert: Windows SmartScreen zeigt
+„Der Computer wurde durch Windows geschützt“ (Weitere Informationen → Trotzdem ausführen).
+
+## Windows
+
+- **Installation:** `X32-Fernsteuerung-Setup.exe` doppelklicken (Ein-Klick-Installer, kein Administrator, Verknüpfung auf dem Desktop und im Startmenü).
+  Download-Seite: die Adresse der Website (`renderer/download.html`, in einem normalen Browser zeigt die Adresse diese Seite).
+- **Firewall:** Beim ersten Verbinden fragt Windows, ob die App auf das Netzwerk darf: „Zugriff zulassen“ (mit „Private Netzwerke“). Sonst blockiert
+  Windows die Antworten des Pults. Die **Verbindungshilfe** erkennt das (Ping klappt, aber nichts kommt zurück) und erklärt Schritte samt Knopf
+  „Firewall-Einstellungen öffnen“.
+- **Netzwerk-Befehle:** `shared/sysnet.js` ruft unter Windows `route print -4`, `ping -n 3 -w 1000` und `arp -a` auf und wertet nur Zahlen und feste Muster
+  aus (deutsche und englische Ausgaben; „Zielhost nicht erreichbar“ zählt nicht als Antwort). Alle Programme laufen ohne sichtbares Fenster.
+  Ausgaben von Windows Server 2025 sind in `test/net-test.js` als Beispiele gespeichert.
+- **Unterschiede zum Mac:** keine macOS-Sperre fürs lokale Netz, kein Terminal-Vergleichstest; REW wird unter `C:\Program Files\REW`, im Benutzer-Ordner und im
+  Startmenü gesucht (`shared/rew.js`); Mikrofon-Freigabe unter Einstellungen → Datenschutz & Sicherheit → Mikrofon; `F11` schaltet Vollbild.
+- **Bildschirm bleibt an**, solange mit dem Pult verbunden (Touch-Monitor am FOH).
+- **Updates:** die App lädt `X32-Fernsteuerung-Setup.exe` aus dem neuesten Release, startet es und beendet sich; der Installer ersetzt die App
+  und öffnet sie wieder. Test-Schalter (nur für die Prüfung in GitHub Actions): `X32_SELFTEST_EXIT`, `X32_SELFTEST_UPDATE_URL`.
+- **Ehrlich:** Auf einem echten Windows-Rechner mit Pult ist es noch nicht ausprobiert (nur auf GitHub-Windows-Servern: Start, Verbinden mit der
+  Pult-Attrappe, Ursachensuche mit den echten Befehlen, Installer, Selbst-Update). Das Touch-Bedienen und die Bildschirmtastatur sind ungetestet.
 
 ## Tests
 
@@ -152,6 +172,8 @@ Anfragen. Die Tests laufen im Browser — einfach die Seiten öffnen:
 - `test/calc-test.html` — Rechner (Delay, Tempo, Pegel, Ton)
 - `test/e2e.html?test=1` prüft auch Mini-Anzeigen (Pixel der Kurven) und Meine Seite
 - `test/offline-test.html` — Startwerte für alle Parameter und der Offline-Speicher
+- `test/net-test.js` (Node) — Netzwerk-Schicht, Ursachen-Diagnose, Windows-Befehle und -Ausgaben; `test/smoke-ci.js` — Rauchtest im echten Electron (Windows, macOS)
+- `test/e2e.html?view=winhelp&plat=win32` — Oberfläche unter Windows (Wörter, Firewall-Knopf)
 - `test/spl-test.html` — Pegel-Rechnung (Bewertungskurven, Fast/Slow, Leq, Terzbänder) und REW-Suche mit erzeugten Signalen
 - `test/measure-test.html` — Messung Ende zu Ende mit simuliertem Mikrofon; braucht Echtzeit und einen kleinen Hilfsserver
   (Chrome mit `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=ton.wav`, Ton: links 1 kHz mit -23 dBFS)
